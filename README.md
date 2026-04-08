@@ -47,11 +47,7 @@ medical-qa-quality-agent/
 
 ```bash
 pip install -r requirements.txt
-
-# 下载 scispaCy 医学模型
-pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.3/en_core_sci_sm-0.5.3.tar.gz
 ```
-
 ### 2. 配置模型
 
 项目支持三种 LLM 提供商，可通过**环境变量**或**代码配置**两种方式设置。
@@ -274,5 +270,3 @@ data/output/
 - vLLM / OpenAI 兼容接口 (本地模型部署)
 
 ---
-
-**设计日期**: 2026-04-08
