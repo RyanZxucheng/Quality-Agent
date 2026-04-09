@@ -75,6 +75,7 @@ class BatchProcessor:
 
                 # 3. 决策
                 evaluation = self.decision_engine.decide(score_result)
+                evaluation.evidence = evidence
                 results.append(evaluation)
 
                 # 4. 分类保存（包含证据）
@@ -153,24 +154,19 @@ class BatchProcessor:
             "id": qa_pair.id,
             "question": qa_pair.question,
             "answer": qa_pair.answer,
-            "metadata": qa_pair.metadata,
             "evidence": {
                 "entity_count": evidence.get("entities", {}).get("entity_count", 0),
                 "standardization_rate": evidence.get("terminology", {}).get("standardization_rate", 0),
                 "compliance_rate": evidence.get("guideline", {}).get("compliance_rate", 1.0),
                 "summary": evidence.get("evidence_summary", "")
             },
+            "metadata": qa_pair.metadata,
             "scores": {
                 "total": evaluation.scores.total_score,
-                "dimensions": [
-                    {
-                        "name": d.name,
-                        "score": d.score,
-                        "max_score": d.max_score,
-                        "reason": d.details.get("reason", "")
-                    }
+                "dimensions": {
+                    d.name: d.score
                     for d in evaluation.scores.dimensions
-                ]
+                }
             },
             "conclusion": evaluation.conclusion.value,
             "conclusion_reason": evaluation.reason

@@ -9,16 +9,22 @@ from pathlib import Path
 from src.processor import BatchProcessor
 from src.config import AppConfig, set_config
 
-# 设置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("medical_qa_agent.log", encoding="utf-8")
-    ]
-)
 logger = logging.getLogger(__name__)
+
+
+def _setup_logging(output_dir: str):
+    """设置日志，输出到控制台和文件"""
+    log_dir = Path(output_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_dir / "medical_qa_agent.log", encoding="utf-8")
+        ]
+    )
 
 
 def main():
@@ -90,6 +96,9 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # 设置日志（确保输出目录存在）
+    _setup_logging(args.output)
 
     # 验证输入文件
     input_path = Path(args.input)

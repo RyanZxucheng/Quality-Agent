@@ -133,20 +133,27 @@ class ReportGenerator:
 
     def _serialize_result(self, result: EvaluationResult) -> Dict[str, Any]:
         """序列化单个结果"""
+        evidence = result.evidence
+        evidence_data = {}
+        if evidence:
+            evidence_data = {
+                "entity_count": evidence.get("entities", {}).get("entity_count", 0),
+                "standardization_rate": evidence.get("terminology", {}).get("standardization_rate", 0),
+                "compliance_rate": evidence.get("guideline", {}).get("compliance_rate", 1.0),
+                "summary": evidence.get("evidence_summary", "")
+            }
+
         return {
             "id": result.qa_pair.id,
             "question": result.qa_pair.question,
             "answer": result.qa_pair.answer,
+            "evidence": evidence_data,
             "scores": {
                 "total": result.scores.total_score,
-                "dimensions": [
-                    {
-                        "name": d.name,
-                        "score": d.score,
-                        "max_score": d.max_score
-                    }
+                "dimensions": {
+                    d.name: d.score
                     for d in result.scores.dimensions
-                ]
+                }
             },
             "issues": result.scores.issues,
             "conclusion": result.conclusion.value,

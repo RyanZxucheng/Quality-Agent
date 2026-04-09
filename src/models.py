@@ -111,6 +111,7 @@ class EvaluationResult:
     scores: ScoreResult
     conclusion: Conclusion
     reason: str
+    evidence: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def create_error_result(cls, qa_pair: QAPair, error: str, conclusion: Conclusion = Conclusion.DISCARD) -> "EvaluationResult":
