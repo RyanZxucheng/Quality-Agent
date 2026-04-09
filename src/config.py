@@ -48,11 +48,16 @@ class AppConfig:
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
     anthropic_api_key: str = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
 
-    # 模型配置
+    # LLM 模型配置（统一入口）
     llm_provider: LLMProvider = LLMProvider.ANTHROPIC
     llm_model: str = "claude-3-5-sonnet-20241022"
-    llm_base_url: str = ""  # vLLM/OpenAI 自定义地址，如 "http://localhost:8000/v1"
-    llm_api_key: str = ""  # 覆盖环境变量
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_temperature: float = 0.1
+    llm_max_tokens: int = 1500
+
+    # NLP 模型配置
+    spacy_model: str = "en_core_sci_sm"
 
     # 批处理配置
     batch_size: int = 10

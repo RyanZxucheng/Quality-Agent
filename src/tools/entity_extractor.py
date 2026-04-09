@@ -30,8 +30,9 @@ class EntityExtractorTool(BaseTool):
         "PROCEDURE": ["Procedure", "Treatment", "Therapy", "Surgery"],
     }
 
-    def __init__(self, model_name: str = "en_core_sci_sm"):
-        self.model_name = model_name
+    def __init__(self, model_name: str = ""):
+        from src.config import get_config
+        self.model_name = model_name or get_config().spacy_model
         self._nlp: Optional[Any] = None
         self._load_model()
 

@@ -4,7 +4,6 @@ LLM 评分引擎
 支持多种后端: Anthropic, vLLM, OpenAI
 """
 import logging
-import os
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Union
 
@@ -28,23 +27,24 @@ class LLMClient(ABC):
 class AnthropicClient(LLMClient):
     """Anthropic Claude 客户端"""
 
-    def __init__(self, model: str, api_key: str = ""):
+    def __init__(self, model: str, api_key: str, temperature: float, max_tokens: int):
         try:
             from anthropic import Anthropic
         except ImportError:
             raise ImportError("请安装 anthropic: pip install anthropic")
 
-        self.model = model
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY", "")
-        if not self.api_key:
+        if not api_key:
             raise ValueError("Anthropic API key not provided")
-        self.client = Anthropic(api_key=self.api_key)
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.client = Anthropic(api_key=api_key)
 
     def chat_completion(self, system_prompt: str, user_prompt: str) -> str:
         response = self.client.messages.create(
             model=self.model,
-            max_tokens=1500,
-            temperature=0.1,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}]
         )
@@ -60,6 +60,8 @@ class OpenAICompatibleClient(LLMClient):
     def __init__(
         self,
         model: str,
+        temperature: float,
+        max_tokens: int,
         base_url: str = "",
         api_key: str = ""
     ):
@@ -69,20 +71,18 @@ class OpenAICompatibleClient(LLMClient):
             raise ImportError("请安装 openai: pip install openai")
 
         self.model = model
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY", "")
+        self.temperature = temperature
+        self.max_tokens = max_tokens
 
-        # 初始化客户端
         if base_url:
-            # 自定义 base_url (如 vLLM)
             self.client = OpenAI(
                 base_url=base_url,
-                api_key=self.api_key or "not-needed"  # vLLM 可能不需要 key
+                api_key=api_key or "not-needed"
             )
         else:
-            # 默认 OpenAI
-            if not self.api_key:
+            if not api_key:
                 raise ValueError("OpenAI API key not provided")
-            self.client = OpenAI(api_key=self.api_key)
+            self.client = OpenAI(api_key=api_key)
 
     def chat_completion(self, system_prompt: str, user_prompt: str) -> str:
         messages = [
@@ -93,8 +93,8 @@ class OpenAICompatibleClient(LLMClient):
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            max_tokens=1500,
-            temperature=0.1
+            max_tokens=self.max_tokens,
+            temperature=self.temperature
         )
         return response.choices[0].message.content
 
@@ -139,9 +139,10 @@ Answer: {answer}
         provider: str = "",
         model: str = "",
         base_url: str = "",
-        api_key: str = ""
+        api_key: str = "",
+        temperature: float = None,
+        max_tokens: int = None,
     ):
-        # 优先使用传入参数，否则使用配置
         config = get_config()
 
         raw_provider = provider or config.llm_provider
@@ -153,16 +154,22 @@ Answer: {answer}
         self.model = model or config.llm_model
         self.base_url = base_url or config.llm_base_url
         self.api_key = api_key or config.llm_api_key
+        self.temperature = temperature if temperature is not None else config.llm_temperature
+        self.max_tokens = max_tokens if max_tokens is not None else config.llm_max_tokens
 
-        # 创建对应客户端
         self.client = self._create_client()
 
     def _create_client(self) -> LLMClient:
         """根据配置创建 LLM 客户端"""
         if self.provider == LLMProvider.ANTHROPIC:
-            return AnthropicClient(self.model, self.api_key)
+            return AnthropicClient(
+                self.model, self.api_key, self.temperature, self.max_tokens
+            )
         elif self.provider in [LLMProvider.VLLM, LLMProvider.OPENAI]:
-            return OpenAICompatibleClient(self.model, self.base_url, self.api_key)
+            return OpenAICompatibleClient(
+                self.model, self.temperature, self.max_tokens,
+                self.base_url, self.api_key
+            )
         else:
             raise ValueError(f"不支持的 provider: {self.provider}")
 

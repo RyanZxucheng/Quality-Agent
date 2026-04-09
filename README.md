@@ -50,143 +50,66 @@ pip install -r requirements.txt
 ```
 ### 2. 配置模型
 
-项目支持三种 LLM 提供商，可通过**环境变量**或**代码配置**两种方式设置。
+所有模型配置统一通过 CLI 参数指定，API 密钥未通过 `--llm-api-key` 指定时会自动从环境变量 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY` 读取。
 
-#### 2.1 配置选项说明
+#### CLI 参数一览
 
-| 配置项 | 类型 | 说明 | 默认值 |
-|--------|------|------|--------|
-| `llm_provider` | `LLMProvider` 枚举或字符串 | LLM 提供商，可选：`"anthropic"`, `"vllm"`, `"openai"` | `"anthropic"` |
-| `llm_model` | 字符串 | 模型名称，取决于提供商 | `"claude-3-5-sonnet-20241022"` |
-| `llm_base_url` | 字符串 | 自定义 API 地址（仅 vLLM 或自定义 OpenAI 兼容接口需要） | 空字符串 |
-| `llm_api_key` | 字符串 | API 密钥（如未设置，会根据 provider 自动使用对应环境变量） | 空字符串 |
+| 参数 | 类型 | 说明 | 默认值 |
+|------|------|------|--------|
+| `--llm-provider` | 字符串 | LLM 提供商：`anthropic` / `openai` / `vllm` | `anthropic` |
+| `--llm-model` | 字符串 | 模型名称 | `claude-3-5-sonnet-20241022` |
+| `--llm-base-url` | 字符串 | 自定义 API 地址（vLLM/兼容接口使用） | — |
+| `--llm-api-key` | 字符串 | API 密钥（未指定时从环境变量读取） | — |
+| `--llm-temperature` | 浮点数 | 生成温度 | `0.1` |
+| `--llm-max-tokens` | 整数 | 最大生成 token 数 | `1500` |
+| `--total-threshold` | 整数 | 总分阈值 | `70` |
+| `--accuracy-threshold` | 整数 | 准确性阈值 | `35` |
+| `--checkpoint-interval` | 整数 | 检查点保存间隔 | `100` |
+| `-o`, `--output` | 字符串 | 输出目录 | `data/output` |
 
-#### 2.2 各提供商详细配置
+#### 各提供商用法示例
 
-##### **Anthropic (默认)**
-- **API Key 环境变量**: `ANTHROPIC_API_KEY`
-- **支持模型示例**:
-  - `"claude-3-5-sonnet-20241022"` (默认)
-  - `"claude-3-opus-20240229"`
-  - `"claude-3-haiku-20240307"`
-- **依赖**: `anthropic` (已包含在 requirements.txt)
-
-##### **OpenAI**
-- **API Key 环境变量**: `OPENAI_API_KEY`
-- **支持模型示例**:
-  - `"gpt-4o"`
-  - `"gpt-4-turbo"`
-  - `"gpt-3.5-turbo"`
-- **依赖**: `openai` (已包含在 requirements.txt)
-
-##### **vLLM (本地部署)**
-- **API Key 环境变量**: `OPENAI_API_KEY` (通常可留空)
-- **base_url**: `"http://localhost:8000/v1"` (默认 vLLM OpenAI 兼容接口地址)
-- **模型名称**: 你本地部署的模型名称，如 `"Qwen/Qwen2.5-7B-Instruct"`, `"meta-llama/Llama-2-7b-chat-hf"`
-- **启动 vLLM 服务**:
-  ```bash
-  python -m vllm.entrypoints.openai.api_server \
-      --model /path/to/your/model \
-      --port 8000 \
-      --tensor-parallel-size 1
-  ```
-
-#### 2.3 环境变量配置（最简单）
-
-根据选择的提供商，设置对应的环境变量：
+**Anthropic（默认）**
 
 ```bash
-# 使用 Anthropic Claude
 export ANTHROPIC_API_KEY="sk-ant-..."
+python -m src.main data/input/example_qa.json
+```
 
-# 或使用 OpenAI
+**OpenAI**
+
+```bash
 export OPENAI_API_KEY="sk-..."
-
-# vLLM 通常不需要 API Key，但也可设置
-export OPENAI_API_KEY=""
+python -m src.main data/input/example_qa.json \
+    --llm-provider openai \
+    --llm-model gpt-4o
 ```
 
-设置后，项目会自动使用默认配置：
-- **提供商**: `anthropic` (如果设置了 `ANTHROPIC_API_KEY`)
-- **模型**: `claude-3-5-sonnet-20241022`
+**vLLM 本地模型**
 
-#### 2.4 代码配置（更灵活）
+```bash
+# 先启动 vLLM 服务
+python -m vllm.entrypoints.openai.api_server \
+    --model /path/to/your/model --port 8000
 
-如需自定义提供商、模型或配置，可在代码中通过 `AppConfig` 设置：
-
-```python
-from src.config import AppConfig, set_config
-
-# 创建配置
-cfg = AppConfig(
-    llm_provider="openai",          # "anthropic", "vllm", "openai"
-    llm_model="gpt-4o",             # 模型名称
-    llm_base_url="",                # vLLM 服务地址，如 "http://localhost:8000/v1"
-    llm_api_key="",                 # 如留空，会自动从环境变量读取
-)
-
-# 应用配置
-set_config(cfg)
+# 再运行评估
+python -m src.main data/input/example_qa.json \
+    --llm-provider vllm \
+    --llm-model Qwen/Qwen2.5-7B-Instruct \
+    --llm-base-url http://localhost:8000/v1
 ```
 
-#### 2.5 完整配置示例
+**自定义生成参数**
 
-##### **示例 1: 使用 Anthropic Claude**
-```python
-from src.config import AppConfig, set_config
-
-cfg = AppConfig(
-    llm_provider="anthropic",
-    llm_model="claude-3-5-sonnet-20241022",
-    # llm_api_key 会自动从 ANTHROPIC_API_KEY 环境变量读取
-)
-set_config(cfg)
+```bash
+python -m src.main data/input/example_qa.json \
+    --llm-temperature 0.2 \
+    --llm-max-tokens 2000 \
+    --total-threshold 75 \
+    --accuracy-threshold 40
 ```
 
-##### **示例 2: 使用 OpenAI**
-```python
-from src.config import AppConfig, set_config
-
-cfg = AppConfig(
-    llm_provider="openai",
-    llm_model="gpt-4o",
-    # llm_api_key 会自动从 OPENAI_API_KEY 环境变量读取
-)
-set_config(cfg)
-```
-
-##### **示例 3: 使用 vLLM 本地模型**
-```python
-from src.config import AppConfig, set_config
-
-cfg = AppConfig(
-    llm_provider="vllm",
-    llm_base_url="http://localhost:8000/v1",
-    llm_model="Qwen/Qwen2.5-7B-Instruct",
-    # vLLM 通常不需要 API Key
-    llm_api_key="",
-)
-set_config(cfg)
-```
-
-##### **示例 4: 使用自定义 OpenAI 兼容接口**
-```python
-from src.config import AppConfig, set_config
-
-cfg = AppConfig(
-    llm_provider="openai",           # 或 "vllm"
-    llm_base_url="https://api.your-service.com/v1",
-    llm_model="your-model-name",
-    llm_api_key="your-api-key",
-)
-set_config(cfg)
-```
-
-#### 2.6 配置优先级
-
-1. **代码中传递的参数**（如 `LLMScoringEngine(provider="openai", ...)`）优先级最高
-2. **`AppConfig` 配置**（通过 `set_config()` 设置）次之
-3. **环境变量**（`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`）为默认后备
+> 完整参数列表可通过 `python -m src.main --help` 查看。
 
 ### 3. 准备数据
 
@@ -209,7 +132,7 @@ set_config(cfg)
 python -m src.main data/input/example_qa.json -o data/output
 ```
 
-> 说明：数据加载阶段如果遇到空的 question/answer，会跳过该条并输出 warning 日志（不会导致整个批处理失败）。
+> 数据加载阶段如果遇到空的 question/answer，会跳过该条并输出 warning 日志（不会导致整个批处理失败）。
 
 ### 5. 查看结果
 
@@ -247,11 +170,7 @@ data/output/
 
 准确性是关键维度，必须达到阈值以上才保留。
 
-> **注意**:
-> - 命令行参数可以覆盖阈值（见 `src/main.py`）：
->   - `--total-threshold`（默认 70）
->   - `--accuracy-threshold`（默认 35）
-> - 如需要不同的阈值，可在运行命令中指定，如 `--accuracy-threshold 40`
+> 阈值可通过 `--total-threshold` 和 `--accuracy-threshold` 调整。
 
 ## 开发计划
 

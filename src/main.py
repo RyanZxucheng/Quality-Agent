@@ -54,6 +54,41 @@ def main():
         help="检查点保存间隔（默认: 100）"
     )
 
+    # LLM 模型配置
+    parser.add_argument(
+        "--llm-provider",
+        choices=["anthropic", "openai", "vllm"],
+        default="anthropic",
+        help="LLM 提供商（默认: anthropic）"
+    )
+    parser.add_argument(
+        "--llm-model",
+        default="claude-3-5-sonnet-20241022",
+        help="LLM 模型名称（默认: claude-3-5-sonnet-20241022）"
+    )
+    parser.add_argument(
+        "--llm-base-url",
+        default="",
+        help="LLM API 地址（vLLM/自定义端点时使用）"
+    )
+    parser.add_argument(
+        "--llm-api-key",
+        default="",
+        help="LLM API 密钥（默认从环境变量读取）"
+    )
+    parser.add_argument(
+        "--llm-temperature",
+        type=float,
+        default=0.1,
+        help="LLM 生成温度（默认: 0.1）"
+    )
+    parser.add_argument(
+        "--llm-max-tokens",
+        type=int,
+        default=1500,
+        help="LLM 最大生成 token 数（默认: 1500）"
+    )
+
     args = parser.parse_args()
 
     # 验证输入文件
@@ -65,6 +100,12 @@ def main():
     # 配置
     config = AppConfig(
         output_dir=args.output,
+        llm_provider=args.llm_provider,
+        llm_model=args.llm_model,
+        llm_base_url=args.llm_base_url,
+        llm_api_key=args.llm_api_key,
+        llm_temperature=args.llm_temperature,
+        llm_max_tokens=args.llm_max_tokens,
     )
     config.thresholds.total_min = args.total_threshold
     config.thresholds.accuracy_min = args.accuracy_threshold
@@ -75,6 +116,8 @@ def main():
     logger.info("=" * 60)
     logger.info(f"输入文件: {args.input}")
     logger.info(f"输出目录: {args.output}")
+    logger.info(f"LLM: {config.llm_provider.value}/{config.llm_model}")
+    logger.info(f"温度: {config.llm_temperature}, 最大token: {config.llm_max_tokens}")
     logger.info(f"总分阈值: {args.total_threshold}")
     logger.info(f"准确性阈值: {args.accuracy_threshold}")
 
