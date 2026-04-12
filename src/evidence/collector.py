@@ -24,12 +24,6 @@ from src.models import (
     RankedResult,
     SelfCheckResult,
 )
-from src.tools import (
-    EntityExtractorTool,
-    GuidelineCheckerTool,
-    TerminologyValidatorTool,
-    WikipediaVerifierTool,
-)
 from src.tools.external_search import ExternalSearchRunner
 
 logger = logging.getLogger(__name__)
@@ -44,12 +38,6 @@ class EvidenceCollector:
     """
 
     def __init__(self):
-        # 基础工具（始终并行执行）
-        self.entity_extractor = EntityExtractorTool()
-        self.terminology = TerminologyValidatorTool()
-        self.wikipedia = WikipediaVerifierTool()
-        self.guideline = GuidelineCheckerTool()
-
         # 按需调用的模块
         self.self_checker = SelfChecker()
         self.internal_searcher = InternalSearchExecutor()
@@ -78,9 +66,6 @@ class EvidenceCollector:
             EvidencePackage（兼容旧版 dict.get() 接口）
         """
         logger.info(f"[EvidenceCollector] Starting collection for {qa_pair.id}")
-
-        # ── 基础工具并行执行（始终执行）──────────────────────────────────────
-        base_evidence = self._collect_base_evidence(qa_pair)
 
         self_check_rounds: List[SelfCheckResult] = []
         internal_context: Optional[InternalContext] = None
@@ -119,13 +104,13 @@ class EvidenceCollector:
 
         # ── 汇总证据包 ────────────────────────────────────────────────────────
         evidence_summary = self._generate_evidence_summary(
-            base_evidence, internal_context, external_evidence, ranked_results
+            internal_context, external_evidence, ranked_results
         )
 
         package = EvidencePackage(
             qa_id=qa_pair.id,
             self_check_rounds=self_check_rounds,
-            base_evidence=base_evidence,
+            base_evidence={},  # 基础工具已移除，保留空字典兼容旧代码
             internal_context=internal_context,
             external_evidence=external_evidence,
             evidence_insufficient=evidence_insufficient,
@@ -143,84 +128,6 @@ class EvidenceCollector:
             f"insufficient={package.evidence_insufficient}"
         )
         return package
-
-    # ── 基础工具并行收集 ──────────────────────────────────────────────────────
-
-    def _collect_base_evidence(self, qa_pair: QAPair) -> Dict[str, Any]:
-        """并行调用四个基础工具"""
-        evidence: Dict[str, Any] = {
-            "qa_id": qa_pair.id,
-            "question": qa_pair.question,
-            "answer": qa_pair.answer,
-        }
-
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {
-                executor.submit(self._collect_entities, qa_pair): "entities",
-                executor.submit(self._collect_terminology, qa_pair): "terminology",
-                executor.submit(self._collect_wikipedia, qa_pair): "wikipedia",
-                executor.submit(self._collect_guideline, qa_pair): "guideline",
-            }
-            for future in as_completed(futures):
-                key = futures[future]
-                try:
-                    evidence[key] = future.result()
-                except Exception as e:
-                    logger.error(f"Failed to collect base evidence [{key}]: {e}")
-                    evidence[key] = {"error": str(e)}
-
-        return evidence
-
-    def _collect_entities(self, qa_pair: QAPair) -> Dict[str, Any]:
-        result = self.entity_extractor.execute(qa_pair.question, qa_pair.answer)
-        if result.success:
-            return {
-                "found": True,
-                "entities": result.data.get("entities", []),
-                "entities_by_type": result.data.get("entities_by_type", {}),
-                "entity_count": result.data.get("entity_count", 0),
-            }
-        return {"found": False, "error": result.error}
-
-    def _collect_terminology(self, qa_pair: QAPair) -> Dict[str, Any]:
-        result = self.terminology.execute(qa_pair.question, qa_pair.answer)
-        if result.success:
-            stats = result.data.get("statistics", {})
-            return {
-                "found": True,
-                "standardization_rate": stats.get("standardization_rate", 0),
-                "standardized_terms_count": stats.get("standardized", 0),
-                "unstandardized_terms": result.data.get("unstandardized_terms", [])[:10],
-                "in_icd10": stats.get("in_icd10", 0),
-                "in_snomed": stats.get("in_snomed", 0),
-            }
-        return {"found": False, "error": result.error}
-
-    def _collect_wikipedia(self, qa_pair: QAPair) -> Dict[str, Any]:
-        result = self.wikipedia.execute(qa_pair.question, qa_pair.answer)
-        if result.success:
-            return {
-                "found": True,
-                "average_confidence": result.data.get("average_confidence", 0),
-                "entities_checked": result.data.get("entities_checked", 0),
-                "entities_found": result.data.get("entities_found", 0),
-                "verification_details": [
-                    r for r in result.data.get("verification_results", [])
-                    if r.get("found")
-                ][:5],
-            }
-        return {"found": False, "error": result.error}
-
-    def _collect_guideline(self, qa_pair: QAPair) -> Dict[str, Any]:
-        result = self.guideline.execute(qa_pair.question, qa_pair.answer)
-        if result.success:
-            return {
-                "found": True,
-                "conditions_identified": result.data.get("conditions_identified", 0),
-                "compliance_rate": result.data.get("compliance_rate", 1.0),
-                "issues": result.data.get("issues", []),
-            }
-        return {"found": False, "error": result.error}
 
     # ── 并行检索 ──────────────────────────────────────────────────────────────
 
@@ -380,7 +287,6 @@ class EvidenceCollector:
 
     def _generate_evidence_summary(
         self,
-        base_evidence: Dict[str, Any],
         internal_context: Optional[InternalContext],
         external_evidence: List[ExternalEvidence],
         ranked_results: List[RankedResult],

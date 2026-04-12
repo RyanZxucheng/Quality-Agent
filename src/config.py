@@ -183,9 +183,6 @@ class AppConfig:
     llm_temperature: float = 0.1
     llm_max_tokens: int = 1500
 
-    # NLP 模型配置
-    spacy_model: str = "en_core_sci_sm"
-
     # 批处理配置
     batch_size: int = 10
     max_workers: int = 3

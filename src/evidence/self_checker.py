@@ -73,16 +73,16 @@ class SelfChecker:
         if prompt_path.exists():
             try:
                 prompt_template = prompt_path.read_text(encoding="utf-8")
-                self._system_prompt = prompt_template.format(
-                    min_confidence=f"{self.config.min_confidence:.2f}"
+                self._system_prompt = prompt_template.replace(
+                    "{min_confidence}", f"{self.config.min_confidence:.2f}"
                 )
                 logger.debug(f"Loaded self-check prompt from {prompt_path}")
                 return self._system_prompt
             except Exception as e:
                 logger.warning(f"Failed to read prompt file {prompt_path}: {e}")
 
-        self._system_prompt = _DEFAULT_SYSTEM_PROMPT.format(
-            min_confidence=f"{self.config.min_confidence:.2f}"
+        self._system_prompt = _DEFAULT_SYSTEM_PROMPT.replace(
+            "{min_confidence}", f"{self.config.min_confidence:.2f}"
         )
         return self._system_prompt
 
