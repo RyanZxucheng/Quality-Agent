@@ -1,0 +1,25 @@
+# 外部检索工具配置
+# 控制 Round 3 的外部搜索行为
+
+# 是否启用外部检索
+enabled: true
+
+# 每个工具最多返回的证据条数
+max_results_per_tool: 2
+
+# 单次工具调用超时（秒）
+timeout: 10
+
+# 工具列表（按列表顺序依次遍历执行）
+tools:
+  - name: pubmed
+    enabled: true
+    query_template: "{missing_slot} clinical evidence"
+    api_key: ""       # PubMed E-utilities 无需 key（可选填 NCBI API key 提升速率限制）
+    endpoint: ""
+
+  - name: bing_search
+    enabled: false
+    query_template: "{missing_slot} medical guideline site:who.int OR site:nih.gov"
+    api_key: ""       # 需填入 Bing Search API key（Azure 认知服务）
+    endpoint: "https://api.bing.microsoft.com/v7.0/search"

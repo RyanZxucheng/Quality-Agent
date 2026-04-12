@@ -26,6 +26,12 @@ class LLMProvider(Enum):
     OPENAI = "openai"
 
 
+class NextAction(Enum):
+    """自检后的下一步动作"""
+    PROCEED = "PROCEED"
+    SEARCH = "SEARCH"
+
+
 @dataclass
 class QAPair:
     """医学问答对"""
@@ -39,26 +45,6 @@ class QAPair:
             raise ValueError("ID cannot be empty")
         if not self.question or not self.answer:
             raise ValueError("Question and answer cannot be empty")
-
-
-@dataclass
-class MedicalEntity:
-    """医学实体"""
-    text: str
-    label: str  # 如: DISEASE, DRUG, SYMPTOM
-    start: int
-    end: int
-    normalized_term: Optional[str] = None  # 标准化术语
-
-
-@dataclass
-class ValidationResult:
-    """验证结果"""
-    tool_name: str
-    is_valid: bool
-    score: float  # 0-1
-    details: Dict[str, Any] = field(default_factory=dict)
-    errors: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -141,3 +127,93 @@ class EvaluationReport:
     summary: EvaluationSummary
     results: List[EvaluationResult]
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+# ─── 多轮证据收集相关模型 ─────────────────────────────────────────────────────
+
+@dataclass
+class SelfCheckResult:
+    """自检结果（Round 0 输出）"""
+    confidence: float           # 0-1，当前证据支撑评审的把握度
+    blocking_issues: List[str]  # 阻碍评审的关键问题
+    missing_slots: str          # 需要补充的信息描述（自然语言段落）
+    next_action: NextAction     # 下一步动作（PROCEED 或 SEARCH）
+    reasoning: str = ""         # 决策理由
+
+
+@dataclass
+class ChunkContext:
+    """内部检索命中的文档片段"""
+    chunk_id: str
+    doc_id: str
+    content: str
+    chunk_index: int            # 在原文档中的位置序号，用于邻域扩展
+    relevance_score: float      # 0-1
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class InternalContext:
+    """内部检索结果（Round 1 输出）"""
+    chunks: List[ChunkContext]
+
+    def to_summary_text(self) -> str:
+        """生成文本摘要供 LLM 使用"""
+        if not self.chunks:
+            return "内部知识库：未检索到相关内容"
+        lines = ["【内部知识库检索结果】"]
+        for i, chunk in enumerate(self.chunks[:5], 1):
+            lines.append(f"  [{i}] 文档={chunk.doc_id} 相关度={chunk.relevance_score:.2f}")
+            lines.append(f"      {chunk.content[:200]}")
+        return "\n".join(lines)
+
+
+@dataclass
+class ExternalEvidence:
+    """外部检索结果（Round 3 输出）"""
+    tool_name: str
+    source: str
+    snippet: str
+    url: str = ""
+    confidence: float = 0.5
+    query_used: str = ""
+
+
+@dataclass
+class RankedResult:
+    """
+    Reranker 输出的统一结果条目
+
+    内部 chunk 和外部 evidence 经 Reranker 混合排序后统一为此格式。
+    通过 source 字段区分来源，原始对象保留在 chunk / evidence 字段中。
+    """
+    source: str                                      # "internal" | "external"
+    content: str                                     # passage 文本（供 Reranker 打分）
+    relevance_score: float                           # Reranker 输出的相关度分数
+    chunk: Optional["ChunkContext"] = None           # 内部检索原始对象
+    evidence: Optional["ExternalEvidence"] = None   # 外部检索原始对象
+
+
+@dataclass
+class EvidencePackage:
+    """聚合证据包（EvidenceCollector 的最终输出）"""
+    qa_id: str
+    self_check_rounds: List[SelfCheckResult]
+    base_evidence: Dict[str, Any]           # 原有工具收集的证据
+    internal_context: Optional[InternalContext]
+    external_evidence: List[ExternalEvidence]
+    evidence_insufficient: bool             # 经过全部轮次后仍证据不足
+    evidence_summary: str                   # 供 LLM 评分使用的完整文本摘要
+    rounds_executed: int                    # 实际执行的轮次数
+    ranked_results: List[RankedResult] = field(default_factory=list)  # Reranker 输出（启用时）
+
+    # ── 兼容旧版 Dict 接口，使现有 LLMScoringEngine / BatchProcessor 无需大改 ──
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "evidence_summary":
+            return self.evidence_summary
+        return self.base_evidence.get(key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "evidence_summary":
+            return self.evidence_summary
+        return self.base_evidence[key]

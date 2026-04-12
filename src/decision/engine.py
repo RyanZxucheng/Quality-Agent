@@ -3,9 +3,9 @@
 根据评分结果决定保留或丢弃数据
 """
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from src.models import ScoreResult, Conclusion, EvaluationResult, Dimension
+from src.models import EvidencePackage, ScoreResult, Conclusion, EvaluationResult, Dimension
 from src.config import get_config
 
 logger = logging.getLogger(__name__)
@@ -21,23 +21,38 @@ class DecisionEngine:
         self.config = get_config()
         self.thresholds = self.config.thresholds
 
-    def decide(self, score_result: ScoreResult) -> EvaluationResult:
+    def decide(
+        self,
+        score_result: ScoreResult,
+        evidence_package: Optional[EvidencePackage] = None,
+    ) -> EvaluationResult:
         """
         根据评分结果做出决策
 
         Args:
             score_result: 评分结果
+            evidence_package: 证据包（可选，用于判断证据不足状态）
 
         Returns:
             EvaluationResult: 包含决策结论和原因
         """
         qa_pair = score_result.qa_pair
         total_score = score_result.total_score
-
-        # 获取准确性分数
         accuracy_score = score_result.get_dimension_score(Dimension.ACCURACY.value) or 0
 
-        # 决策逻辑
+        # 优先检查证据不足标志
+        if evidence_package is not None and evidence_package.evidence_insufficient:
+            logger.info(
+                f"Decision for {qa_pair.id}: DISCARD (evidence insufficient after all rounds)"
+            )
+            return EvaluationResult(
+                qa_pair=qa_pair,
+                scores=score_result,
+                conclusion=Conclusion.DISCARD,
+                reason="证据不足，待人工复核",
+            )
+
+        # 正常决策逻辑
         conclusion, reason = self._make_decision(total_score, accuracy_score, score_result)
 
         logger.info(
@@ -49,7 +64,7 @@ class DecisionEngine:
             qa_pair=qa_pair,
             scores=score_result,
             conclusion=conclusion,
-            reason=reason
+            reason=reason,
         )
 
     def _get_critical_issues(self, issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -117,17 +132,27 @@ class DecisionEngine:
         # 通过所有检查，保留数据
         return Conclusion.RETAIN, self._build_retain_reasons(total_score, accuracy_score)
 
-    def decide_batch(self, score_results: List[ScoreResult]) -> List[EvaluationResult]:
+    def decide_batch(
+        self,
+        score_results: List[ScoreResult],
+        evidence_packages: Optional[List[Optional[EvidencePackage]]] = None,
+    ) -> List[EvaluationResult]:
         """
         批量决策
 
         Args:
             score_results: 评分结果列表
+            evidence_packages: 对应的证据包列表（可选）
 
         Returns:
             评估结果列表
         """
-        return [self.decide(sr) for sr in score_results]
+        if evidence_packages is None:
+            evidence_packages = [None] * len(score_results)
+        return [
+            self.decide(sr, ep)
+            for sr, ep in zip(score_results, evidence_packages)
+        ]
 
     def get_statistics(self, results: List[EvaluationResult]) -> dict:
         """

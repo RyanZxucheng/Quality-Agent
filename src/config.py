@@ -2,10 +2,140 @@
 配置管理
 """
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import os
+import logging
+
 from src.models import LLMProvider
 from src.utils.enum_utils import str_to_enum
+
+logger = logging.getLogger(__name__)
+
+
+def _load_yaml(path: str) -> Dict[str, Any]:
+    """加载 YAML 文件，不存在或解析失败时返回空字典"""
+    try:
+        import yaml
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        logger.warning(f"Failed to load YAML config {path}: {e}")
+        return {}
+
+
+@dataclass
+class SelfCheckConfig:
+    """自检模块配置"""
+    enabled: bool = True
+    min_confidence: float = 0.7    # 作为 prompt 中“可直接评审”参考阈值
+    min_rounds: int = 0            # 强制最少内部检索轮次（0 表示不强制）
+    prompt_path: str = "config/prompts/self_check.md"
+
+    @classmethod
+    def from_yaml(cls, path: str = "config/self_check.yaml") -> "SelfCheckConfig":
+        data = _load_yaml(path)
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class InternalSearchConfig:
+    """内部检索配置"""
+    enabled: bool = False           # 默认关闭，需建立索引后开启
+    index_dir: str = "data/index"   # 索引目录（含 chunks.jsonl）
+    bm25_top_k: int = 10
+    vector_top_k: int = 10
+    rerank_top_n: int = 3           # 重排后保留的片段数
+    neighborhood_window: int = 1    # 邻域扩展：前后各取 N 个片段
+
+    @classmethod
+    def from_yaml(cls, path: str = "config/internal_search.yaml") -> "InternalSearchConfig":
+        data = _load_yaml(path)
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class LocalRerankConfig:
+    """本地 CrossEncoder 模型配置"""
+    model_name: str = "BAAI/bge-reranker-base"
+    device: str = "cpu"
+    batch_size: int = 32
+
+
+@dataclass
+class ApiRerankConfig:
+    """API Reranker 配置（Jina / Cohere）"""
+    provider: str = "jina"                              # jina | cohere
+    model_name: str = "jina-reranker-v2-base-multilingual"
+    api_key: str = ""                                   # 也可用 RERANK_API_KEY 环境变量
+
+
+@dataclass
+class RerankConfig:
+    """Reranker 顶层配置"""
+    enabled: bool = False
+    backend: str = "local"                              # local | api
+    local: LocalRerankConfig = field(default_factory=LocalRerankConfig)
+    api: ApiRerankConfig = field(default_factory=ApiRerankConfig)
+    top_n: int = 5
+
+    @classmethod
+    def from_yaml(cls, path: str = "config/rerank.yaml") -> "RerankConfig":
+        data = _load_yaml(path)
+
+        local_data = data.pop("local", {})
+        api_data = data.pop("api", {})
+
+        # 环境变量覆盖 api_key
+        env_key = os.getenv("RERANK_API_KEY", "")
+        if env_key:
+            api_data["api_key"] = env_key
+
+        obj = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        if local_data:
+            obj.local = LocalRerankConfig(
+                **{k: v for k, v in local_data.items() if k in LocalRerankConfig.__dataclass_fields__}
+            )
+        if api_data:
+            obj.api = ApiRerankConfig(
+                **{k: v for k, v in api_data.items() if k in ApiRerankConfig.__dataclass_fields__}
+            )
+        return obj
+
+
+@dataclass
+class ExternalToolConfig:
+    """单个外部工具配置"""
+    name: str = ""
+    enabled: bool = True
+    query_template: str = "{missing_slot} medical evidence"
+    api_key: str = ""
+    endpoint: str = ""
+
+
+@dataclass
+class ExternalSearchConfig:
+    """外部检索配置"""
+    enabled: bool = False
+    max_results_per_tool: int = 2
+    timeout: int = 10
+    tools: List[ExternalToolConfig] = field(default_factory=lambda: [
+        ExternalToolConfig(name="pubmed", enabled=True,
+                           query_template="{missing_slot} clinical evidence"),
+    ])
+
+    @classmethod
+    def from_yaml(cls, path: str = "config/external_tools.yaml") -> "ExternalSearchConfig":
+        data = _load_yaml(path)
+        raw_tools = data.pop("tools", None)
+        obj = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__ and k != "tools"})
+        if raw_tools:
+            obj.tools = [
+                ExternalToolConfig(**{k: v for k, v in t.items() if k in ExternalToolConfig.__dataclass_fields__})
+                for t in raw_tools
+            ]
+        return obj
 
 
 @dataclass
@@ -28,20 +158,17 @@ class Thresholds:
 
 
 @dataclass
-class SourceWeights:
-    """知识源权重"""
-    terminology: float = 0.4
-    guideline: float = 0.4
-    wikipedia: float = 0.2
-
-
-@dataclass
 class AppConfig:
     """应用配置"""
     # 评分配置
     weights: ScoringWeights = field(default_factory=ScoringWeights)
     thresholds: Thresholds = field(default_factory=Thresholds)
-    source_weights: SourceWeights = field(default_factory=SourceWeights)
+
+    # 多轮证据收集配置
+    self_check: SelfCheckConfig = field(default_factory=SelfCheckConfig)
+    internal_search: InternalSearchConfig = field(default_factory=InternalSearchConfig)
+    external_search: ExternalSearchConfig = field(default_factory=ExternalSearchConfig)
+    rerank: RerankConfig = field(default_factory=RerankConfig)
 
     # API 配置
     umls_api_key: str = field(default_factory=lambda: os.getenv("UMLS_API_KEY", ""))
@@ -69,16 +196,23 @@ class AppConfig:
 
     def __post_init__(self):
         """初始化后处理，转换字符串为枚举"""
-        # 处理 llm_provider 从字符串转换
         if isinstance(self.llm_provider, str):
             self.llm_provider = str_to_enum(LLMProvider, self.llm_provider, LLMProvider.ANTHROPIC)
 
-        # 从环境变量填充API密钥（如果未提供）
         self._fill_api_keys_from_env()
 
-        # 如果 llm_api_key 未设置，根据provider设置默认值
         if not self.llm_api_key:
             self._set_default_llm_api_key()
+
+        # 从 YAML 文件加载子配置（文件不存在时使用默认值）
+        self._load_sub_configs()
+
+    def _load_sub_configs(self):
+        """从 YAML 文件加载子模块配置"""
+        self.self_check = SelfCheckConfig.from_yaml()
+        self.internal_search = InternalSearchConfig.from_yaml()
+        self.external_search = ExternalSearchConfig.from_yaml()
+        self.rerank = RerankConfig.from_yaml()
 
     def _fill_api_keys_from_env(self):
         """从环境变量填充API密钥"""

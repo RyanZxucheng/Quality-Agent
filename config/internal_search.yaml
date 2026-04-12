@@ -1,0 +1,20 @@
+# 内部检索配置
+# 控制 Round 1 的 BM25 + 向量混合检索行为
+
+# 是否启用内部检索（需先建立 chunks.jsonl 索引后才开启）
+enabled: false
+
+# 索引目录（需包含 chunks.jsonl 文件）
+index_dir: data/index
+
+# BM25 召回候选数
+bm25_top_k: 10
+
+# 向量（TF-IDF）召回候选数
+vector_top_k: 10
+
+# RRF 融合后精排保留数
+rerank_top_n: 3
+
+# 邻域扩展窗口大小（命中片段前后各扩展 N 个相邻片段）
+neighborhood_window: 1

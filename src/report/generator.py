@@ -134,14 +134,12 @@ class ReportGenerator:
     def _serialize_result(self, result: EvaluationResult) -> Dict[str, Any]:
         """序列化单个结果"""
         evidence = result.evidence
-        evidence_data = {}
-        if evidence:
-            evidence_data = {
-                "entity_count": evidence.get("entities", {}).get("entity_count", 0),
-                "standardization_rate": evidence.get("terminology", {}).get("standardization_rate", 0),
-                "compliance_rate": evidence.get("guideline", {}).get("compliance_rate", 1.0),
-                "summary": evidence.get("evidence_summary", "")
-            }
+        evidence_data: Dict[str, Any] = {}
+
+        if evidence is not None:
+            from src.models import EvidencePackage
+            if isinstance(evidence, EvidencePackage):
+                evidence_data = self._serialize_evidence_package(evidence)
 
         return {
             "id": result.qa_pair.id,
@@ -157,11 +155,75 @@ class ReportGenerator:
             },
             "issues": result.scores.issues,
             "conclusion": result.conclusion.value,
-            "reason": result.reason
+            "reason": result.reason,
+        }
+
+    def _serialize_evidence_package(self, pkg: "EvidencePackage") -> Dict[str, Any]:
+        """序列化 EvidencePackage 为可读字典"""
+        self_check_data = [
+            {
+                "confidence": round(r.confidence, 3),
+                "next_action": r.next_action.value,
+                "blocking_issues": r.blocking_issues,
+                "missing_slots": r.missing_slots,
+                "reasoning": r.reasoning,
+            }
+            for r in pkg.self_check_rounds
+        ]
+
+        internal_data = None
+        if pkg.internal_context and pkg.internal_context.chunks:
+            ic = pkg.internal_context
+            internal_data = {
+                "chunks_retrieved": len(ic.chunks),
+                "top_chunks": [
+                    {
+                        "doc_id": c.doc_id,
+                        "chunk_id": c.chunk_id,
+                        "relevance_score": round(c.relevance_score, 3),
+                        "content_preview": c.content[:150],
+                    }
+                    for c in ic.chunks[:3]
+                ],
+            }
+
+        external_data = [
+            {
+                "tool": e.tool_name,
+                "source": e.source,
+                "url": e.url,
+                "confidence": e.confidence,
+                "snippet": e.snippet[:200],
+                "query_used": e.query_used,
+            }
+            for e in pkg.external_evidence
+        ]
+
+        return {
+            "rounds_executed": pkg.rounds_executed,
+            "evidence_insufficient": pkg.evidence_insufficient,
+            "self_check_rounds": self_check_data,
+            "internal": internal_data,
+            "external": external_data,
         }
 
     def _generate_summary_text(self, report: EvaluationReport) -> str:
-        """生成文本摘要"""
+        """生成文本摘要（含多轮证据统计）"""
+        internal_used = 0
+        external_used = 0
+        insufficient_count = 0
+
+        from src.models import EvidencePackage
+        for r in report.results:
+            if isinstance(r.evidence, EvidencePackage):
+                pkg: EvidencePackage = r.evidence
+                if pkg.internal_context and pkg.internal_context.chunks:
+                    internal_used += 1
+                if pkg.external_evidence:
+                    external_used += 1
+                if pkg.evidence_insufficient:
+                    insufficient_count += 1
+
         lines = [
             "=" * 60,
             "医学 QA 数据质量评估报告",
@@ -180,6 +242,13 @@ class ReportGenerator:
             f"平均分: {report.summary.average_score:.1f}",
             "",
             "-" * 60,
+            "多轮证据收集统计",
+            "-" * 60,
+            f"触发内部检索: {internal_used} 条",
+            f"触发外部检索: {external_used} 条",
+            f"证据不足（待人工复核）: {insufficient_count} 条",
+            "",
+            "-" * 60,
             "各维度平均分数",
             "-" * 60,
         ]
@@ -190,37 +259,8 @@ class ReportGenerator:
         lines.extend([
             "",
             "=" * 60,
-            ""
+            "",
         ])
 
         return "\n".join(lines)
 
-    def generate_discard_reasons_report(
-        self,
-        results: List[EvaluationResult],
-        output_path: str
-    ):
-        """
-        生成丢弃原因统计报告
-
-        Args:
-            results: 评估结果列表
-            output_path: 输出文件路径
-        """
-        # 统计丢弃原因
-        discard_reasons: Dict[str, int] = {}
-        for r in results:
-            if r.conclusion == Conclusion.DISCARD:
-                reason_key = r.reason.split("(")[0].strip()
-                discard_reasons[reason_key] = discard_reasons.get(reason_key, 0) + 1
-
-        # 保存统计
-        report = {
-            "discard_reasons": discard_reasons,
-            "total_discarded": sum(discard_reasons.values())
-        }
-
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, ensure_ascii=False, indent=2)
-
-        logger.info(f"Discard reasons report saved to {output_path}")

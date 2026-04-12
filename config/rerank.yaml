@@ -1,0 +1,31 @@
+# Reranker 配置
+# 内部检索与外部检索并行后，对混合候选集进行统一重排序
+
+enabled: false
+
+# backend 可选值：local | api
+backend: local
+
+# ── 本地模型配置（backend: local 时生效）──────────────────────────────────────
+local:
+  # 推荐模型（中英双语，适合医疗场景，首次使用会自动下载）：
+  #   BAAI/bge-reranker-base        （轻量，~1GB，CPU 友好）
+  #   BAAI/bge-reranker-large       （精度更高，CPU 稍慢）
+  #   cross-encoder/ms-marco-MiniLM-L-6-v2  （英文优化，较小）
+  model_name: BAAI/bge-reranker-base
+  device: cpu       # cpu | cuda（有 GPU 时改为 cuda 可加速）
+  batch_size: 32
+
+# ── API 模型配置（backend: api 时生效）────────────────────────────────────────
+api:
+  # provider 可选值：jina | cohere
+  provider: jina
+  # Jina 模型：jina-reranker-v2-base-multilingual（中英双语）| jina-reranker-v1-base-en
+  # Cohere 模型：rerank-v3.5 | rerank-multilingual-v3.0
+  model_name: jina-reranker-v2-base-multilingual
+  # api_key 也可通过环境变量 RERANK_API_KEY 设置（优先级更高）
+  api_key: ""
+
+# ── 通用配置 ──────────────────────────────────────────────────────────────────
+# 重排后最终保留的结果数
+top_n: 5

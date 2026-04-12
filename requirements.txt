@@ -9,6 +9,24 @@ https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.3/en_core_sci_s
 # Data processing
 pydantic>=2.0.0
 pandas>=2.0.0
+numpy>=1.24.0
+
+# Config
+pyyaml>=6.0
+
+# Internal search (Round 1)
+rank-bm25>=0.2.2          # BM25 关键词检索
+scikit-learn>=1.3.0       # TF-IDF 向量检索 + 余弦相似度
+
+# Reranker（可选，按实际使用的后端安装）
+# 本地模型（backend: local）：
+sentence-transformers>=3.0.0
+# 推荐模型会在首次使用时自动下载：BAAI/bge-reranker-base
+#
+# Cohere API（backend: cohere）：
+cohere>=5.0.0
+#
+# Jina API（backend: jina）：无需额外依赖，使用内置 requests
 
 # API clients
 requests>=2.31.0

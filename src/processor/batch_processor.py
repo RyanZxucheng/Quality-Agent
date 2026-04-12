@@ -67,14 +67,16 @@ class BatchProcessor:
 
         for i, qa_pair in enumerate(tqdm(qa_pairs, desc="Processing")):
             try:
-                # 1. 工具收集证据
+                # 1. 多轮自适应证据收集（返回 EvidencePackage）
                 evidence = self.evidence_collector.collect(qa_pair)
 
-                # 2. LLM 基于证据评分
+                # 2. LLM 基于证据评分（EvidencePackage 兼容 dict.get() 接口）
                 score_result = self.llm_scoring_engine.score(qa_pair, evidence)
 
-                # 3. 决策
-                evaluation = self.decision_engine.decide(score_result)
+                # 3. 决策（传入 evidence_package 以处理证据不足状态）
+                from src.models import EvidencePackage
+                evidence_pkg = evidence if isinstance(evidence, EvidencePackage) else None
+                evaluation = self.decision_engine.decide(score_result, evidence_pkg)
                 evaluation.evidence = evidence
                 results.append(evaluation)
 
@@ -146,20 +148,28 @@ class BatchProcessor:
     def _format_output(
         self,
         qa_pair: QAPair,
-        evidence: Dict[str, Any],
+        evidence: Any,
         evaluation: EvaluationResult
     ) -> Dict[str, Any]:
-        """格式化输出（包含证据和评分）"""
+        """格式化输出"""
+        from src.models import EvidencePackage
+        evidence_info = {}
+        if isinstance(evidence, EvidencePackage):
+            evidence_info = {
+                "rounds_executed": evidence.rounds_executed,
+                "evidence_insufficient": evidence.evidence_insufficient,
+                "internal_chunks": (
+                    len(evidence.internal_context.chunks)
+                    if evidence.internal_context else 0
+                ),
+                "external_sources": len(evidence.external_evidence),
+            }
+
         return {
             "id": qa_pair.id,
             "question": qa_pair.question,
             "answer": qa_pair.answer,
-            "evidence": {
-                "entity_count": evidence.get("entities", {}).get("entity_count", 0),
-                "standardization_rate": evidence.get("terminology", {}).get("standardization_rate", 0),
-                "compliance_rate": evidence.get("guideline", {}).get("compliance_rate", 1.0),
-                "summary": evidence.get("evidence_summary", "")
-            },
+            "evidence": evidence_info,
             "metadata": qa_pair.metadata,
             "scores": {
                 "total": evaluation.scores.total_score,
@@ -169,7 +179,7 @@ class BatchProcessor:
                 }
             },
             "conclusion": evaluation.conclusion.value,
-            "conclusion_reason": evaluation.reason
+            "conclusion_reason": evaluation.reason,
         }
 
     def _create_error_result(self, qa_pair: QAPair, error: str) -> EvaluationResult:
@@ -245,22 +255,3 @@ class BatchProcessor:
 
         return summary
 
-    def resume_from_checkpoint(self, output_dir: str) -> Optional[int]:
-        """
-        从检查点恢复
-
-        Returns:
-            已处理的数量，如果没有检查点则返回 None
-        """
-        checkpoint_file = Path(output_dir) / "checkpoint" / "checkpoint.json"
-
-        if not checkpoint_file.exists():
-            return None
-
-        with open(checkpoint_file, "r", encoding="utf-8") as f:
-            checkpoint = json.load(f)
-
-        processed = checkpoint.get("processed_count", 0)
-        logger.info(f"Resuming from checkpoint: {processed} already processed")
-
-        return processed

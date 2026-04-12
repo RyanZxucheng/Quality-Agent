@@ -1,0 +1,13 @@
+# 自检模块配置
+# 控制 Round 0 / Round 2 的行为
+
+enabled: true
+
+# 作为 prompt 中“可直接评审”的参考置信度阈值（0-1）
+min_confidence: 0.7
+
+# 强制最少执行内部检索的轮次（0 = 不强制，完全由 LLM 自检决定）
+min_rounds: 0
+
+# 自检 prompt 模板路径
+prompt_path: config/prompts/self_check.md
