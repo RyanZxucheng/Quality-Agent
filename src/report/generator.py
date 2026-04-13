@@ -192,8 +192,7 @@ class ReportGenerator:
                 "tool": e.tool_name,
                 "source": e.source,
                 "url": e.url,
-                "confidence": e.confidence,
-                "snippet": e.snippet[:200],
+                "snippet": e.snippet,
                 "query_used": e.query_used,
             }
             for e in pkg.external_evidence

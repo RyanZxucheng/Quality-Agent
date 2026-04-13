@@ -175,7 +175,6 @@ class ExternalEvidence:
     source: str
     snippet: str
     url: str = ""
-    confidence: float = 0.5
     query_used: str = ""
 
 

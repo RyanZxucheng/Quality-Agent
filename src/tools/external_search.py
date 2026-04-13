@@ -1,6 +1,6 @@
 """
 外部检索调度器（Round 3）
-统一接口调用多个外部搜索工具，按配置列表顺序依次执行，命中高可靠即停。
+统一接口调用多个外部搜索工具，按配置列表顺序依次执行，全部跑完后汇总返回。
 
 已实现的工具：
   - pubmed：PubMed E-utilities API（免费，无需 API key）
@@ -69,7 +69,6 @@ class PubMedTool(BaseExternalTool):
                     source=f"PubMed PMID:{pmid}",
                     snippet=abstract[:500],
                     url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
-                    confidence=0.75,
                     query_used=built_query,
                 ))
             time.sleep(0.34)  # NCBI 要求：无 key 时每秒最多 3 次请求
@@ -148,7 +147,6 @@ class BingSearchTool(BaseExternalTool):
                     source=item.get("name", ""),
                     snippet=item.get("snippet", "")[:500],
                     url=item.get("url", ""),
-                    confidence=0.6,
                     query_used=built_query,
                 ))
             return results
@@ -157,11 +155,128 @@ class BingSearchTool(BaseExternalTool):
             return []
 
 
+# ── Baidu Search 工具 ─────────────────────────────────────────────────────────
+
+class BaiduSearchTool(BaseExternalTool):
+    """
+    百度网页搜索（HTML 抓取，无需 API key）
+    依赖：pip install beautifulsoup4
+
+    使用 Session 先访问首页取得 cookie，再发起搜索请求，避免被拦截为超时页。
+    描述元素适配百度现行结构（.cu-line-clamp-2 / [class*=summary-text]）。
+    """
+
+    name = "baidu_search"
+    HOME_URL = "https://www.baidu.com"
+    SEARCH_URL = "https://www.baidu.com/s"
+    HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Accept-Encoding": "gzip, deflate",
+        "Connection": "keep-alive",
+    }
+
+    # 描述选择器：按优先级依次尝试
+    _DESC_SELECTORS = [
+        ".cu-line-clamp-2",
+        "[class*=summary-text]",
+        "[class*=abstract]",
+        ".c-abstract",
+        ".c-span-last",
+    ]
+
+    def __init__(self, tool_cfg, timeout: int = 10, max_results: int = 2):
+        super().__init__(tool_cfg, timeout, max_results)
+        self._session: Optional[requests.Session] = None
+
+    def _get_session(self) -> requests.Session:
+        """懒加载 Session，首次调用时访问百度首页获取 cookie"""
+        if self._session is not None:
+            return self._session
+        session = requests.Session()
+        try:
+            session.get(self.HOME_URL, headers=self.HEADERS, timeout=self.timeout)
+            logger.debug("Baidu session initialized with cookies")
+        except Exception as e:
+            logger.warning(f"Baidu homepage prefetch failed (will retry on search): {e}")
+        self._session = session
+        return self._session
+
+    def search(self, query: str) -> List[ExternalEvidence]:
+        try:
+            from bs4 import BeautifulSoup
+        except ImportError:
+            logger.warning("beautifulsoup4 not installed. Install with: pip install beautifulsoup4")
+            return []
+
+        built_query = self._build_query(query)
+        params = {"wd": built_query, "rn": str(self.max_results*5)}
+
+        try:
+            session = self._get_session()
+            resp = session.get(
+                self.SEARCH_URL,
+                headers={**self.HEADERS, "Referer": self.HOME_URL},
+                params=params,
+                timeout=self.timeout,
+            )
+            resp.encoding = "utf-8"
+        except Exception as e:
+            logger.warning(f"Baidu request failed for query '{built_query}': {e}")
+            return []
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        results = []
+
+        for item in soup.select(".result"):
+            if len(results) >= self.max_results:
+                break
+
+            title_el = item.select_one("h3 a") or item.select_one("h3")
+            if not title_el:
+                continue
+
+            title = title_el.get_text(strip=True)
+            url = title_el.get("href", "") if title_el.name == "a" else ""
+
+            desc = ""
+            for sel in self._DESC_SELECTORS:
+                desc_el = item.select_one(sel)
+                if desc_el:
+                    desc = desc_el.get_text(strip=True)
+                    break
+
+            if not title:
+                continue
+
+            results.append(ExternalEvidence(
+                tool_name=self.name,
+                source=title,
+                snippet=desc[:500],
+                url=url,
+                query_used=built_query,
+            ))
+
+        if not results:
+            logger.warning(
+                "Baidu search returned no results. "
+                "HTML structure may have changed or request was blocked."
+            )
+
+        return results
+
+
 # ── 工具注册表 ────────────────────────────────────────────────────────────────
 
 TOOL_REGISTRY: Dict[str, type] = {
     "pubmed": PubMedTool,
     "bing_search": BingSearchTool,
+    "baidu_search": BaiduSearchTool,
 }
 
 
@@ -170,7 +285,7 @@ TOOL_REGISTRY: Dict[str, type] = {
 class ExternalSearchRunner:
     """
     外部检索调度器
-    按配置列表顺序依次调用启用的工具，命中高可靠来源即停止
+    按配置列表顺序依次调用启用的工具，全部执行后汇总返回
     """
 
     def __init__(self, config: Optional[ExternalSearchConfig] = None):
@@ -219,9 +334,6 @@ class ExternalSearchRunner:
                 results = tool.search(missing_slots)
                 if results:
                     all_evidence.extend(results)
-                    if any(e.confidence >= 0.7 for e in results):
-                        logger.debug("High-confidence evidence found, stopping external search")
-                        return all_evidence
             except Exception as e:
                 logger.error(f"External tool '{tool.name}' raised unexpected error: {e}")
 

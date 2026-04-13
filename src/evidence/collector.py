@@ -235,12 +235,12 @@ class EvidenceCollector:
                     chunk=chunk,
                 ))
 
-        # 外部 evidence → RankedResult
+        # 外部 evidence → RankedResult（初始分设为 0.0，Reranker 会覆盖为实际相关度）
         for ev in external_evidence:
             candidates.append(RankedResult(
                 source="external",
                 content=ev.snippet,
-                relevance_score=ev.confidence,
+                relevance_score=0.0,
                 evidence=ev,
             ))
 
@@ -319,8 +319,8 @@ class EvidenceCollector:
                 parts.append("\n═══ EXTERNAL 证据（外部检索）═══")
                 for ev in external_evidence:
                     parts.append(
-                        f"[{ev.tool_name}] {ev.source} (置信度={ev.confidence:.2f})\n"
-                        f"  {ev.snippet[:300]}"
+                        f"[{ev.tool_name}] {ev.source}\n"
+                        f"  {ev.snippet}"
                     )
 
         return "\n".join(parts) if parts else "未收集到有效证据"

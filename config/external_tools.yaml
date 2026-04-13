@@ -13,13 +13,19 @@ timeout: 10
 # 工具列表（按列表顺序依次遍历执行）
 tools:
   - name: pubmed
-    enabled: true
-    query_template: "{missing_slot} clinical evidence"
+    enabled: false
+    query_template: "{missing_slot}"
     api_key: ""       # PubMed E-utilities 无需 key（可选填 NCBI API key 提升速率限制）
     endpoint: ""
 
   - name: bing_search
     enabled: false
-    query_template: "{missing_slot} medical guideline site:who.int OR site:nih.gov"
+    query_template: "{missing_slot}"
     api_key: ""       # 需填入 Bing Search API key（Azure 认知服务）
     endpoint: "https://api.bing.microsoft.com/v7.0/search"
+
+  - name: baidu_search
+    enabled: true     # 无需 api_key，依赖 beautifulsoup4
+    query_template: "{missing_slot}"
+    api_key: ""
+    endpoint: ""
