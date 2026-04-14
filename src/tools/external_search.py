@@ -1,5 +1,5 @@
-"""
-外部检索调度器（Round 3）
+﻿"""
+外部检索调度器
 统一接口调用多个外部搜索工具，按配置列表顺序依次执行，全部跑完后汇总返回。
 
 已实现的工具：
@@ -455,6 +455,10 @@ class ExaMCPTool(BaseExternalTool):
         if not text:
             return []
 
+        # 优先解析 Exa 纯文本格式（Title/URL/Highlights）
+        if "Title:" in text and "URL:" in text:
+            return self._parse_exa_text_format(text)
+
         parsed_values: List[Any] = []
         try:
             parsed_values.append(json.loads(text))
@@ -479,6 +483,49 @@ class ExaMCPTool(BaseExternalTool):
         # 最后兜底：把纯文本输出作为一条 snippet 返回
         if not candidates:
             candidates.append({"snippet": text[:1200]})
+        return candidates
+
+    def _parse_exa_text_format(self, text: str) -> List[Dict[str, Any]]:
+        """解析 Exa web_search_exa 的纯文本返回格式。"""
+        blocks = [b.strip() for b in text.split("---") if b.strip()]
+        candidates: List[Dict[str, Any]] = []
+        # Exa 结果中常见的字段头，遇到它们应退出 highlights 区域
+        KNOWN_FIELD_PREFIXES = ("Title:", "URL:", "Published:", "Author:", "Highlights:")
+
+        for block in blocks:
+            title = ""
+            url = ""
+            highlights: List[str] = []
+            in_highlights = False
+
+            for line in block.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("Title:"):
+                    title = stripped[len("Title:"):].strip()
+                    in_highlights = False
+                elif stripped.startswith("URL:"):
+                    url = stripped[len("URL:"):].strip()
+                    in_highlights = False
+                elif stripped.startswith("Highlights:"):
+                    in_highlights = True
+                elif any(stripped.startswith(p) for p in KNOWN_FIELD_PREFIXES):
+                    # 其他已知字段，退出 highlights
+                    in_highlights = False
+                elif in_highlights and stripped:
+                    # 在 Highlights 区域内，收集所有非空行
+                    if stripped.startswith("-"):
+                        highlights.append(stripped[1:].strip())
+                    else:
+                        highlights.append(stripped)
+                elif stripped == "":
+                    continue
+
+            snippet = "\n".join(highlights)
+            candidates.append({
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+            })
         return candidates
 
     def _scan_dict_for_hits(self, obj: Any) -> List[Dict[str, Any]]:

@@ -1,0 +1,12 @@
+{
+  "total_processed": 4,
+  "retained": 2,
+  "discarded": 2,
+  "retention_rate": 0.5,
+  "average_score": 53.75,
+  "dimension_averages": {
+    "completeness": 17.0,
+    "accuracy": 23.75,
+    "professionalism": 13.0
+  }
+}

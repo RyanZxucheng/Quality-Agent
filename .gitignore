@@ -22,6 +22,5 @@ Thumbs.db
 
 # Project
 *.log
-data/output/
 changes_summary.md
 docs
