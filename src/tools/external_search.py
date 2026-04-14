@@ -4,14 +4,17 @@
 
 已实现的工具：
   - pubmed：PubMed E-utilities API（免费，无需 API key）
-  - bing_search：Bing Web Search API（需要 Azure key，默认关闭）
+  - bing_search：Bing 搜索占位工具（默认禁用）
 
 新增工具：继承 BaseExternalTool 并注册到 TOOL_REGISTRY。
 """
 import logging
+import json
+import shutil
+import subprocess
 import time
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -120,39 +123,100 @@ class PubMedTool(BaseExternalTool):
 
 class BingSearchTool(BaseExternalTool):
     """
-    Bing Web Search API（需要 Azure 认知服务 key）
-    默认关闭，配置 api_key 并在 external_tools.yaml 中 enabled: true 后生效
+    Bing 网页搜索（HTML 抓取，无需 API key）
+    使用 cn.bing.com，适合中文查询；依赖 beautifulsoup4。
     """
 
     name = "bing_search"
 
     def search(self, query: str) -> List[ExternalEvidence]:
-        if not self.tool_cfg.api_key:
-            logger.warning("Bing Search API key not configured, skipping")
+        try:
+            from bs4 import BeautifulSoup, Tag
+            from typing import cast
+            from urllib.parse import urlencode
+        except ImportError:
+            logger.warning("beautifulsoup4 not installed. Install with: pip install beautifulsoup4")
             return []
 
         built_query = self._build_query(query)
-        endpoint = self.tool_cfg.endpoint or "https://api.bing.microsoft.com/v7.0/search"
-        headers = {"Ocp-Apim-Subscription-Key": self.tool_cfg.api_key}
-        params = {"q": built_query, "count": self.max_results, "mkt": "en-US"}
 
         try:
-            resp = requests.get(endpoint, headers=headers, params=params, timeout=self.timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            results = []
-            for item in data.get("webPages", {}).get("value", [])[:self.max_results]:
-                results.append(ExternalEvidence(
-                    tool_name=self.name,
-                    source=item.get("name", ""),
-                    snippet=item.get("snippet", "")[:500],
-                    url=item.get("url", ""),
-                    query_used=built_query,
-                ))
+            encoded = urlencode({"q": built_query})
+            url = f"https://cn.bing.com/search?{encoded}"
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+            }
+            response = requests.get(url, headers=headers, timeout=self.timeout)
+
+            if response.status_code != 200:
+                logger.warning(f"Bing returned status code: {response.status_code}")
+                return []
+
+            response.encoding = "utf-8"
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            b_results_element = soup.find("ol", id="b_results")
+            if b_results_element is None:
+                logger.warning("没有找到 ol#b_results，可能是页面结构变了。")
+                return []
+
+            b_results_tag = cast(Tag, b_results_element)
+            result_items = b_results_tag.find_all("li")
+
+            results: List[ExternalEvidence] = []
+            for i in range(min(len(result_items), self.max_results)):
+                row = result_items[i]
+                if not isinstance(row, Tag):
+                    continue
+
+                h2_element = row.find("h2")
+                if h2_element is None:
+                    continue
+                h2_tag = cast(Tag, h2_element)
+
+                title = h2_tag.get_text().strip()
+
+                link_tag_element = h2_tag.find("a")
+                if link_tag_element is None:
+                    continue
+                link_tag = cast(Tag, link_tag_element)
+
+                link = link_tag.get("href")
+                if link is None:
+                    continue
+
+                content_element = row.find("p", class_="b_algoSlug")
+                content_text = ""
+                if content_element is not None and isinstance(content_element, Tag):
+                    content_text = content_element.get_text()
+
+                results.append(
+                    ExternalEvidence(
+                        tool_name=self.name,
+                        source=title,
+                        snippet=content_text[:500],
+                        url=str(link),
+                        query_used=built_query,
+                    )
+                )
+
+            if not results:
+                logger.warning(
+                    f"No parsed results for built_query={built_query!r}. "
+                    "Check if Bing HTML structure has changed."
+                )
+
             return results
+
         except Exception as e:
-            logger.warning(f"Bing search failed for query '{built_query}': {e}")
+            logger.warning(f"Bing scraping error for query '{built_query}': {e!s}")
             return []
+
+
 
 
 # ── Baidu Search 工具 ─────────────────────────────────────────────────────────
@@ -271,12 +335,174 @@ class BaiduSearchTool(BaseExternalTool):
         return results
 
 
+# ── Exa MCP 工具 ──────────────────────────────────────────────────────────────
+
+class ExaMCPTool(BaseExternalTool):
+    """
+    Exa MCP 搜索工具（通过 mcporter 调用 exa.web_search_exa）
+
+    与 Agent-Reach 方案一致：
+      1) 依赖本机安装 mcporter
+      2) 通过 `mcporter config add exa https://mcp.exa.ai/mcp` 注册
+      3) 使用 `mcporter call 'exa.web_search_exa(...)'` 执行搜索
+    """
+
+    name = "exa_mcp"
+    DEFAULT_ALIAS = "exa"
+    DEFAULT_TOOL = "web_search_exa"
+
+    def __init__(self, tool_cfg: ExternalToolConfig, timeout: int = 10, max_results: int = 2):
+        super().__init__(tool_cfg, timeout, max_results)
+        # 兼容 endpoint 字段：允许写成 `exa`（默认别名）
+        alias = (tool_cfg.endpoint or "").strip()
+        self.alias = alias if alias else self.DEFAULT_ALIAS
+
+    def search(self, query: str) -> List[ExternalEvidence]:
+        built_query = self._build_query(query)
+        mcporter = shutil.which("mcporter")
+        if not mcporter:
+            logger.warning(
+                "Exa MCP unavailable: mcporter not found. Install with `npm install -g mcporter` "
+                "and run `mcporter config add exa https://mcp.exa.ai/mcp`."
+            )
+            return []
+
+        if not self._has_alias(mcporter):
+            logger.warning(
+                "Exa MCP unavailable: alias '%s' not configured in mcporter. "
+                "Run `mcporter config add %s https://mcp.exa.ai/mcp`.",
+                self.alias,
+                self.alias,
+            )
+            return []
+
+        raw = self._call_web_search(mcporter, built_query)
+        if raw is None:
+            return []
+
+        return self._parse_evidence(raw, built_query)
+
+    def _run(self, args: List[str]) -> Optional[subprocess.CompletedProcess]:
+        try:
+            return subprocess.run(
+                args,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self.timeout,
+            )
+        except Exception as e:
+            logger.warning(f"Exa MCP command failed: args={args!r}, err={e}")
+            return None
+
+    def _has_alias(self, mcporter: str) -> bool:
+        proc = self._run([mcporter, "config", "list"])
+        if proc is None:
+            return False
+        combined = f"{proc.stdout}\n{proc.stderr}".lower()
+        return self.alias.lower() in combined
+
+    def _escape_for_mcporter_call(self, value: str) -> str:
+        # 以 JSON 字符串转义保证引号/换行安全，再去掉外层双引号。
+        return json.dumps(value, ensure_ascii=False)[1:-1]
+
+    def _call_web_search(self, mcporter: str, query: str) -> Optional[str]:
+        escaped_query = self._escape_for_mcporter_call(query)
+        call_expr = (
+            f'{self.alias}.{self.DEFAULT_TOOL}(query: "{escaped_query}", '
+            f"numResults: {self.max_results})"
+        )
+        proc = self._run([mcporter, "call", call_expr])
+        if proc is None:
+            return None
+        if proc.returncode != 0:
+            logger.warning(
+                "Exa MCP command non-zero exit. code=%s, stderr=%s",
+                proc.returncode,
+                (proc.stderr or "").strip()[:300],
+            )
+            return None
+
+        return (proc.stdout or "").strip()
+
+    def _parse_evidence(self, raw_output: str, query_used: str) -> List[ExternalEvidence]:
+        candidates = self._extract_result_candidates(raw_output)
+        evidence: List[ExternalEvidence] = []
+        for item in candidates:
+            title = str(item.get("title") or item.get("source") or item.get("name") or "").strip()
+            snippet = str(item.get("snippet") or item.get("text") or item.get("summary") or "").strip()
+            url = str(item.get("url") or item.get("link") or "").strip()
+
+            if not title and not snippet:
+                continue
+
+            evidence.append(
+                ExternalEvidence(
+                    tool_name=self.name,
+                    source=title or "Exa MCP result",
+                    snippet=snippet[:500],
+                    url=url,
+                    query_used=query_used,
+                )
+            )
+            if len(evidence) >= self.max_results:
+                break
+        return evidence
+
+    def _extract_result_candidates(self, raw_output: str) -> List[Dict[str, Any]]:
+        text = (raw_output or "").strip()
+        if not text:
+            return []
+
+        parsed_values: List[Any] = []
+        try:
+            parsed_values.append(json.loads(text))
+        except Exception:
+            pass
+
+        # mcporter 某些版本会输出多行，逐行尝试 JSON 解析。
+        if not parsed_values:
+            for line in text.splitlines():
+                line = line.strip()
+                if not line or (not line.startswith("{") and not line.startswith("[")):
+                    continue
+                try:
+                    parsed_values.append(json.loads(line))
+                except Exception:
+                    continue
+
+        candidates: List[Dict[str, Any]] = []
+        for obj in parsed_values:
+            candidates.extend(self._scan_dict_for_hits(obj))
+
+        # 最后兜底：把纯文本输出作为一条 snippet 返回
+        if not candidates:
+            candidates.append({"snippet": text[:1200]})
+        return candidates
+
+    def _scan_dict_for_hits(self, obj: Any) -> List[Dict[str, Any]]:
+        hits: List[Dict[str, Any]] = []
+        if isinstance(obj, dict):
+            has_url = any(k in obj for k in ("url", "link"))
+            has_text = any(k in obj for k in ("snippet", "text", "summary", "title", "source", "name"))
+            if has_url or has_text:
+                hits.append(obj)
+            for value in obj.values():
+                hits.extend(self._scan_dict_for_hits(value))
+        elif isinstance(obj, list):
+            for value in obj:
+                hits.extend(self._scan_dict_for_hits(value))
+        return hits
+
+
 # ── 工具注册表 ────────────────────────────────────────────────────────────────
 
 TOOL_REGISTRY: Dict[str, type] = {
     "pubmed": PubMedTool,
     "bing_search": BingSearchTool,
     "baidu_search": BaiduSearchTool,
+    "exa_mcp": ExaMCPTool,
 }
 
 

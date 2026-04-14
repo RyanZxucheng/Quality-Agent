@@ -151,7 +151,7 @@ tools:
     max_results: 2
 ```
 
-### Bing Search（需要 Azure Key）
+### Bing Search（默认启用，无需 API Key）
 
 ```yaml
 enabled: true
@@ -159,11 +159,30 @@ enabled: true
 tools:
   - name: bing_search
     enabled: true
-    priority: 1
-    api_key: "your-azure-key-here"
-    endpoint: "https://api.bing.microsoft.com/v7.0/search"
-    query_template: "{missing_slot} medical guideline"
-    max_results: 2
+    query_template: "{missing_slot}"
+```
+
+当前仓库中的 `bing_search` 已实现为基于 `cn.bing.com` 的网页检索工具，默认启用，
+通过 HTML 抓取返回结果，不依赖官方 API Key；如需关闭，可将 `enabled` 改为 `false`。
+
+### Exa MCP（通过 MCP Server 调用）
+
+```yaml
+enabled: true
+
+tools:
+  - name: exa_mcp
+    enabled: true
+    query_template: "{missing_slot}"
+    endpoint: "exa"  # mcporter 别名，默认 exa
+    api_key: ""      # 该方案不直接使用，留空即可
+```
+
+首次使用需先配置 mcporter：
+
+```bash
+npm install -g mcporter
+mcporter config add exa https://mcp.exa.ai/mcp
 ```
 
 ---
@@ -174,7 +193,7 @@ tools:
 |------|------|
 | `config/self_check.yaml` | 自检置信度阈值、prompt 路径 |
 | `config/internal_search.yaml` | 内部检索参数（BM25/向量/重排/邻域） |
-| `config/external_tools.yaml` | 外部工具列表、优先级、API 配置 |
+| `config/external_tools.yaml` | 外部工具列表、搜索工具配置、MCP 配置 |
 | `config/prompts/self_check.md` | 自检系统 prompt（含 few-shot 示例） |
 
 ---
