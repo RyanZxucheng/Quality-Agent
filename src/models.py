@@ -35,14 +35,12 @@ class NextAction(Enum):
 @dataclass
 class QAPair:
     """医学问答对"""
-    id: str
-    question: str
-    answer: str
+    id: Optional[str] = None
+    question: str = ""
+    answer: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        if not self.id:
-            raise ValueError("ID cannot be empty")
         if not self.question or not self.answer:
             raise ValueError("Question and answer cannot be empty")
 

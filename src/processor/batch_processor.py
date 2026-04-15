@@ -129,13 +129,27 @@ class BatchProcessor:
 
     def _create_qa_pair(self, item: Dict, index: int) -> QAPair:
         """创建 QAPair 对象"""
-        # 支持多种字段名
+        # 自动识别 messages 格式（如 OpenAI 对话格式）
+        if "messages" in item and isinstance(item["messages"], list):
+            question = ""
+            answer = ""
+            for msg in item["messages"]:
+                if isinstance(msg, dict):
+                    role = msg.get("role")
+                    content = msg.get("content", "")
+                    if role == "user" and not question:
+                        question = content
+                    elif role == "assistant" and not answer:
+                        answer = content
+        else:
+            # 支持多种字段名
+            question = item.get("question") or item.get("Question") or item.get("q", "")
+            answer = item.get("answer") or item.get("Answer") or item.get("a", "")
+
         qa_id = item.get("id") or item.get("ID") or f"qa_{index}"
-        question = item.get("question") or item.get("Question") or item.get("q", "")
-        answer = item.get("answer") or item.get("Answer") or item.get("a", "")
 
         # 保留原始元数据（排除所有已识别的字段变体）
-        excluded_keys = {"id", "ID", "question", "Question", "q", "answer", "Answer", "a"}
+        excluded_keys = {"id", "ID", "question", "Question", "q", "answer", "Answer", "a", "messages"}
         metadata = {k: v for k, v in item.items() if k not in excluded_keys}
 
         return QAPair(
