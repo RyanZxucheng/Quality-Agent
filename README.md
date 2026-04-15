@@ -71,19 +71,22 @@ Quality-Agent 不是生成式问答系统，而是一个**数据质检 Agent**�
 
 ## 核心流程
 
-```mermaid
-graph LR
-    A[Round 0 自检] -->|需补证| B[Round 1 检索]
-    B --> C[Rerank<br/>可选]
-    C --> D[LLM 评分]
-    A -->|无需补证| D
-    D --> E[规则决策]
-
-    style A fill:#dbeafe,stroke:#2563eb,stroke-width:2px
-    style B fill:#dcfce7,stroke:#16a34a,stroke-width:2px
-    style C fill:#f3e8ff,stroke:#9333ea,stroke-width:2px
-    style D fill:#ffedd5,stroke:#ea580c,stroke-width:2px
-    style E fill:#fee2e2,stroke:#dc2626,stroke-width:2px
+```text
+    ┌─────────────┐         ┌─────────────┐     ┌─────────────┐
+    │   Round 0   │   Yes   │  Round 1    │     │   Rerank    │
+    │    自检     ├────────>│    检索     │────>│   (可选)    │
+    └──────┬──────┘         └─────────────┘     └──────┬──────┘
+           │                                            │
+           │                    No                      │
+           │                                            │
+           │              ┌─────────────┐               │
+           └─────────────>│  LLM 评分   │<──────────────┘
+                          └──────┬──────┘
+                                 │
+                                 v
+                          ┌─────────────┐
+                          │  规则决策   │
+                          └─────────────┘
 ```
 
 1. **Round 0 自检**：LLM 先判断现有信息是否已经足够完成质量评审
