@@ -93,6 +93,7 @@ class EvidenceCollector:
             # ── Rerank：混合候选集统一重排序 ─────────────────────────────────
             ranked_results = self._run_rerank(
                 question=qa_pair.question,
+                missing_slots=round0.missing_slots,
                 internal_context=internal_context,
                 external_evidence=external_evidence,
             )
@@ -211,6 +212,7 @@ class EvidenceCollector:
     def _run_rerank(
         self,
         question: str,
+        missing_slots: str,
         internal_context: Optional[InternalContext],
         external_evidence: List[ExternalEvidence],
     ) -> List[RankedResult]:
@@ -248,9 +250,10 @@ class EvidenceCollector:
             logger.debug("No candidates for reranking")
             return []
 
+        query = question if not missing_slots else f"{question}\n{missing_slots}"
         top_n = self.config.rerank.top_n
         try:
-            ranked = reranker.rerank(question, candidates, top_n)
+            ranked = reranker.rerank(query, candidates, top_n)
             logger.info(
                 f"[Rerank] {len(candidates)} candidates → top {len(ranked)} results "
                 f"(internal={sum(1 for r in ranked if r.source == 'internal')}, "

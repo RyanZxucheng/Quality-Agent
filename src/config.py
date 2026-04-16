@@ -46,8 +46,7 @@ class InternalSearchConfig:
     index_dir: str = "data/index"   # 索引目录（含 chunks.jsonl）
     bm25_top_k: int = 10
     vector_top_k: int = 10
-    rerank_top_n: int = 3           # 重排后保留的片段数
-    neighborhood_window: int = 1    # 邻域扩展：前后各取 N 个片段
+    fusion_top_k: int = 3           # RRF 融合后保留的片段数
 
     @classmethod
     def from_yaml(cls, path: str = "config/internal_search.yaml") -> "InternalSearchConfig":

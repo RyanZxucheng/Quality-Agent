@@ -178,12 +178,8 @@ class InternalSearchExecutor:
         # RRF 融合
         merged = _rrf_merge(bm25_ranked, vector_ranked)
 
-        # 取 TopK 进行精排（此处用 RRF 得分作为相关度代理）
-        top_ids = [cid for cid, _ in merged[: self.config.rerank_top_n * 3]]
-        reranked = self._simple_rerank(query, top_ids, merged)
-
-        # 邻域扩展
-        final_chunks = self._neighborhood_expand(reranked[: self.config.rerank_top_n])
+        # 取 TopK 直接作为最终结果
+        final_chunks = self._to_chunks(merged[: self.config.fusion_top_k])
 
         return InternalContext(chunks=final_chunks)
 
@@ -224,64 +220,23 @@ class InternalSearchExecutor:
             logger.warning(f"Vector search failed: {e}")
             return []
 
-    # ── 精排 ─────────────────────────────────────────────────────────────────
+    # ── 结果转换 ─────────────────────────────────────────────────────────────
 
-    def _simple_rerank(
-        self,
-        query: str,
-        candidate_ids: List[str],
-        rrf_scores: List[Tuple[str, float]],
-    ) -> List[Tuple[str, float]]:
-        """简单精排：使用 RRF 得分（生产环境可替换为 cross-encoder）"""
-        score_map = dict(rrf_scores)
-        return [(cid, score_map.get(cid, 0.0)) for cid in candidate_ids]
-
-    # ── 邻域扩展 ──────────────────────────────────────────────────────────────
-
-    def _neighborhood_expand(
-        self, reranked: List[Tuple[str, float]]
-    ) -> List[ChunkContext]:
-        """
-        对每个命中片段，扩展前后各 window 个相邻片段（同一 doc_id 内）
-        去重并保持原有相关度排序
-        """
-        window = self.config.neighborhood_window
-        seen_ids: set = set()
+    def _to_chunks(self, merged: List[Tuple[str, float]]) -> List[ChunkContext]:
+        """将 RRF 融合结果转换为 ChunkContext 列表"""
         result: List[ChunkContext] = []
-
-        # 先加入命中片段本身，再追加邻居
-        for cid, score in reranked:
+        for cid, score in merged:
             idx = self._chunk_id_index.get(cid)
-            if idx is None or cid in seen_ids:
+            if idx is None:
                 continue
-            center_chunk = self._chunks[idx]
-            neighbors = self._get_neighbors(idx, center_chunk.doc_id, window)
-
-            for neighbor_idx, is_center in neighbors:
-                nc = self._chunks[neighbor_idx]
-                if nc.chunk_id in seen_ids:
-                    continue
-                seen_ids.add(nc.chunk_id)
-                result.append(ChunkContext(
-                    chunk_id=nc.chunk_id,
-                    doc_id=nc.doc_id,
-                    content=nc.content,
-                    chunk_index=nc.chunk_index,
-                    relevance_score=score if is_center else score * 0.7,
-                    metadata=nc.metadata,
-                ))
-
-        return result
-
-    def _get_neighbors(
-        self, center_idx: int, doc_id: str, window: int
-    ) -> List[Tuple[int, bool]]:
-        """获取同一文档内的相邻片段下标列表"""
-        total = len(self._chunks)
-        result = []
-        for offset in range(-window, window + 1):
-            ni = center_idx + offset
-            if 0 <= ni < total and self._chunks[ni].doc_id == doc_id:
-                result.append((ni, offset == 0))
+            c = self._chunks[idx]
+            result.append(ChunkContext(
+                chunk_id=c.chunk_id,
+                doc_id=c.doc_id,
+                content=c.content,
+                chunk_index=c.chunk_index,
+                relevance_score=score,
+                metadata=c.metadata,
+            ))
         return result
 

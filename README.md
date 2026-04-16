@@ -343,8 +343,7 @@ enabled: true
 index_dir: data/index
 bm25_top_k: 10
 vector_top_k: 10
-rerank_top_n: 3
-neighborhood_window: 1
+fusion_top_k: 3
 ```
 
 ---

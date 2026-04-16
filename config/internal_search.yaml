@@ -13,8 +13,5 @@ bm25_top_k: 10
 # 向量（TF-IDF）召回候选数
 vector_top_k: 10
 
-# RRF 融合后精排保留数
-rerank_top_n: 3
-
-# 邻域扩展窗口大小（命中片段前后各扩展 N 个相邻片段）
-neighborhood_window: 1
+# RRF 融合后保留的片段数
+fusion_top_k: 3
