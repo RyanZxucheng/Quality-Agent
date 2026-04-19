@@ -185,6 +185,7 @@ class AppConfig:
     # 批处理配置
     batch_size: int = 10
     max_workers: int = 3
+    max_retained: Optional[int] = None
 
     # 输出配置
     output_dir: str = "data/output"

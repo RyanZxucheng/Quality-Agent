@@ -134,7 +134,7 @@ pip install -r requirements.txt
 运行示例：
 
 ```bash
-python -m src.main data/input/example_qa.json \
+python -m src.main --dataset data/input/example_qa.json \
   --llm-provider vllm \
   --llm-model Qwen/Qwen2.5-7B-Instruct \
   --llm-base-url http://localhost:8000/v1
@@ -185,19 +185,19 @@ export OPENAI_API_KEY="sk-..."
 **最简运行：**
 
 ```bash
-python -m src.main data/input/example_qa.json
+python -m src.main --dataset data/input/example_qa.json
 ```
 
 **指定输出目录：**
 
 ```bash
-python -m src.main data/input/example_qa.json -o data/output
+python -m src.main --dataset data/input/example_qa.json -o data/output
 ```
 
 **使用 OpenAI：**
 
 ```bash
-python -m src.main data/input/example_qa.json \
+python -m src.main --dataset data/input/example_qa.json \
   --llm-provider openai \
   --llm-model gpt-4o
 ```
@@ -205,7 +205,7 @@ python -m src.main data/input/example_qa.json \
 **使用本地 vLLM：**
 
 ```bash
-python -m src.main data/input/example_qa.json \
+python -m src.main --dataset data/input/example_qa.json \
   --llm-provider vllm \
   --llm-model Qwen/Qwen2.5-7B-Instruct \
   --llm-base-url http://localhost:8000/v1
@@ -220,9 +220,17 @@ bash Start.sh
 **调整阈值：**
 
 ```bash
-python -m src.main data/input/example_qa.json \
+python -m src.main --dataset data/input/example_qa.json \
   --total-threshold 75 \
   --accuracy-threshold 40
+```
+
+**多文件输入：**
+
+```bash
+python -m src.main \
+  --dataset data/input/file1.json data/input/file2.jsonl \
+  --max-retained 100
 ```
 
 完整参数可通过以下命令查看：
@@ -267,6 +275,7 @@ data/output/
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
+| `--dataset` | 输入文件路径列表（支持多个） | 必填 |
 | `--llm-provider` | `anthropic` / `openai` / `vllm` | `anthropic` |
 | `--llm-model` | 模型名称 | `claude-3-5-sonnet-20241022` |
 | `--llm-base-url` | OpenAI 兼容接口地址 | 空 |
@@ -276,6 +285,7 @@ data/output/
 | `--total-threshold` | 总分阈值 | `70` |
 | `--accuracy-threshold` | 准确性阈值 | `35` |
 | `--checkpoint-interval` | 检查点间隔 | `100` |
+| `--max-retained` | 筛选出指定数量后停止 | `None` |
 | `-o`, `--output` | 输出目录 | `data/output` |
 
 ### YAML 配置文件

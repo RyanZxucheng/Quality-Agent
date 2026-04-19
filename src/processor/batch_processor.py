@@ -38,17 +38,19 @@ class BatchProcessor:
 
     def process_file(
         self,
-        input_path: str,
+        input_paths: List[str],
         output_dir: Optional[str] = None,
-        checkpoint_interval: int = 100
+        checkpoint_interval: int = 100,
+        max_retained: Optional[int] = None
     ) -> EvaluationSummary:
         """
         处理输入文件
 
         Args:
-            input_path: 输入文件路径（JSON 或 CSV）
+            input_paths: 输入文件路径列表（JSON/CSV/JSONL）
             output_dir: 输出目录
             checkpoint_interval: 检查点保存间隔
+            max_retained: 最大保留数量，达到后提前停止
 
         Returns:
             EvaluationSummary: 评估摘要
@@ -56,9 +58,9 @@ class BatchProcessor:
         output_dir = output_dir or self.config.output_dir
         ensure_dir(output_dir)
 
-        # 加载 QA 对
-        qa_pairs = self._load_qa_pairs(input_path)
-        logger.info(f"Loaded {len(qa_pairs)} QA pairs from {input_path}")
+        # 加载 QA 对（支持多文件）
+        qa_pairs = self._load_qa_pairs(input_paths)
+        logger.info(f"Loaded {len(qa_pairs)} QA pairs from {len(input_paths)} file(s)")
 
         # 处理每个 QA 对
         results = []
@@ -86,6 +88,11 @@ class BatchProcessor:
                 else:
                     discarded_data.append(self._format_output(qa_pair, evidence, evaluation))
 
+                # 达到最大保留数时提前停止
+                if max_retained is not None and len(retained_data) >= max_retained:
+                    logger.info(f"Reached max retained limit ({max_retained}), stopping early.")
+                    break
+
                 # 保存检查点
                 if (i + 1) % checkpoint_interval == 0:
                     self._save_checkpoint(output_dir, results, retained_data, discarded_data)
@@ -100,25 +107,30 @@ class BatchProcessor:
 
         return summary
 
-    def _load_qa_pairs(self, input_path: str) -> List[QAPair]:
-        """加载 QA 对"""
-        path = Path(input_path)
-        suffix = path.suffix.lower()
+    def _load_qa_pairs(self, input_paths: List[str]) -> List[QAPair]:
+        """加载 QA 对（支持多文件）"""
+        all_items = []
+        for input_path in input_paths:
+            path = Path(input_path)
+            suffix = path.suffix.lower()
 
-        try:
-            if suffix == ".json":
-                items = safe_read_json(input_path)
-            elif suffix == ".csv":
-                items = safe_read_csv(input_path)
-            elif suffix == ".jsonl":
-                items = safe_read_jsonl(input_path)
-            else:
-                raise ValueError(f"Unsupported file format: {suffix}")
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Input file not found: {input_path}")
+            try:
+                if suffix == ".json":
+                    items = safe_read_json(input_path)
+                elif suffix == ".csv":
+                    items = safe_read_csv(input_path)
+                elif suffix == ".jsonl":
+                    items = safe_read_jsonl(input_path)
+                else:
+                    raise ValueError(f"Unsupported file format: {suffix}")
+            except FileNotFoundError:
+                raise FileNotFoundError(f"Input file not found: {input_path}")
+
+            all_items.extend(items)
+            logger.info(f"Loaded {len(items)} items from {input_path}")
 
         qa_pairs = []
-        for i, item in enumerate(items):
+        for i, item in enumerate(all_items):
             try:
                 qa_pairs.append(self._create_qa_pair(item, i))
             except ValueError as e:

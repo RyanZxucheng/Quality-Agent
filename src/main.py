@@ -33,8 +33,10 @@ def main():
         description="医学 QA 数据质量评估 Agent"
     )
     parser.add_argument(
-        "input",
-        help="输入文件路径（JSON/CSV/JSONL）"
+        "--dataset",
+        nargs="+",
+        required=True,
+        help="输入文件路径列表（支持 JSON/CSV/JSONL）"
     )
     parser.add_argument(
         "-o", "--output",
@@ -58,6 +60,12 @@ def main():
         type=int,
         default=100,
         help="检查点保存间隔（默认: 100）"
+    )
+    parser.add_argument(
+        "--max-retained",
+        type=int,
+        default=None,
+        help="筛选出指定数量数据后停止（默认: 不限制）"
     )
 
     # LLM 模型配置
@@ -101,10 +109,10 @@ def main():
     _setup_logging(args.output)
 
     # 验证输入文件
-    input_path = Path(args.input)
-    if not input_path.exists():
-        logger.error(f"输入文件不存在: {args.input}")
-        sys.exit(1)
+    for dataset_path in args.dataset:
+        if not Path(dataset_path).exists():
+            logger.error(f"输入文件不存在: {dataset_path}")
+            sys.exit(1)
 
     # 配置
     config = AppConfig(
@@ -115,6 +123,7 @@ def main():
         llm_api_key=args.llm_api_key,
         llm_temperature=args.llm_temperature,
         llm_max_tokens=args.llm_max_tokens,
+        max_retained=args.max_retained,
     )
     config.thresholds.total_min = args.total_threshold
     config.thresholds.accuracy_min = args.accuracy_threshold
@@ -123,20 +132,23 @@ def main():
     logger.info("=" * 60)
     logger.info("医学 QA 数据质量评估 Agent 启动")
     logger.info("=" * 60)
-    logger.info(f"输入文件: {args.input}")
+    logger.info(f"输入文件: {', '.join(args.dataset)}")
     logger.info(f"输出目录: {args.output}")
     logger.info(f"LLM: {config.llm_provider.value}/{config.llm_model}")
     logger.info(f"温度: {config.llm_temperature}, 最大token: {config.llm_max_tokens}")
     logger.info(f"总分阈值: {args.total_threshold}")
     logger.info(f"准确性阈值: {args.accuracy_threshold}")
+    if args.max_retained is not None:
+        logger.info(f"最大保留数: {args.max_retained}")
 
     # 处理
     try:
         processor = BatchProcessor()
         summary = processor.process_file(
-            input_path=args.input,
+            input_paths=args.dataset,
             output_dir=args.output,
-            checkpoint_interval=args.checkpoint_interval
+            checkpoint_interval=args.checkpoint_interval,
+            max_retained=args.max_retained
         )
 
         logger.info("=" * 60)
