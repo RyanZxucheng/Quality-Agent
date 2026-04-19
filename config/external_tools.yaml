@@ -17,15 +17,15 @@ tools:
     query_template: "{missing_slot}"
     endpoint: "exa"   # mcporter 中的 MCP 别名（默认 exa）
 
-  - name: bing_search
-    enabled: false
-    query_template: "{missing_slot}"
-
   - name: baidu_search
-    enabled: false     # 无需 api_key，依赖 beautifulsoup4
+    enabled: true     # 无需 api_key，依赖 beautifulsoup4
     query_template: "{missing_slot}"
     api_key: ""
     endpoint: ""
+
+  - name: bing_search
+    enabled: false
+    query_template: "{missing_slot}"
 
   - name: pubmed
     enabled: false

@@ -157,7 +157,7 @@ class BatchProcessor:
 
                 # 切分当前批次
                 batch = qa_pairs[processed : processed + batch_size]
-                qa_to_index = {qa: i for i, qa in enumerate(batch)}
+                qa_to_index = {id(qa): i for i, qa in enumerate(batch)}
                 batch_results: List[Tuple[QAPair, EvaluationResult, Optional[Dict[str, Any]]]] = []
 
                 # 并行执行当前批次
@@ -175,7 +175,7 @@ class BatchProcessor:
                             batch_results.append((qa, evaluation, None))
 
                 # 按原始顺序整理批次结果（保持输出稳定性）
-                batch_results.sort(key=lambda x: qa_to_index[x[0]])
+                batch_results.sort(key=lambda x: qa_to_index[id(x[0])])
 
                 # 在主线程更新结果（保证 checkpoint 同步安全）
                 for qa_pair, evaluation, output in batch_results:

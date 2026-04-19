@@ -7,6 +7,7 @@ BM25 + TF-IDF 向量混合召回 → RRF 融合排序 → 邻域扩展
 import json
 import logging
 import pickle
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 

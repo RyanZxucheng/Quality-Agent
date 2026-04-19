@@ -1,7 +1,9 @@
-unset SSL_CERT_FILE
-unset REQUESTS_CA_BUNDLE
+#!/bin/bash
 
-python -m src.main data/input/example_qa.json \
-    --llm-provider vllm \
-    --llm-model qwen3dot5_4b \
-    --llm-base-url http://14.103.165.117:8010/v1
+python -m src.main \
+  --dataset "data/input/example_qa.json" \
+  --llm-provider "vllm" \
+  --llm-model "Qwen3.6-35B-A3B" \
+  --llm-base-url "http://localhost:9060/v1" \
+  --max-retained 100 \
+  --batch-size 5

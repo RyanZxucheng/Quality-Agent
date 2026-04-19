@@ -3,6 +3,7 @@
 调用 LLM 判断当前证据是否足够，并识别信息缺口
 """
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
