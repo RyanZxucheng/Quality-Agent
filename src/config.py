@@ -183,9 +183,14 @@ class AppConfig:
     llm_max_tokens: int = 1500
 
     # 批处理配置
-    batch_size: int = 10
+    batch_size: int = 1          # 默认顺序处理，>1 时启用并行
     max_workers: int = 3
     max_retained: Optional[int] = None
+
+    @property
+    def is_parallel(self) -> bool:
+        """是否启用并行处理：batch_size > 1 时自动启用"""
+        return self.batch_size > 1
 
     # 输出配置
     output_dir: str = "data/output"

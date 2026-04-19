@@ -72,8 +72,19 @@ class InternalSearchExecutor:
         self._tfidf = None          # sklearn TfidfVectorizer
         self._tfidf_matrix = None   # 向量矩阵
         self._chunk_id_index: Dict[str, int] = {}  # chunk_id → list 下标
+        self._warm_up_lock = threading.Lock()
 
     # ── 索引加载 ──────────────────────────────────────────────────────────────
+
+    def warm_up(self) -> None:
+        """预加载索引，避免并发时的懒加载竞争（线程安全）"""
+        if self._chunks is not None:
+            return
+        with self._warm_up_lock:
+            if self._chunks is not None:
+                return
+            _ = self._ensure_index()
+        logger.debug("InternalSearchExecutor warmed up")
 
     def _ensure_index(self) -> bool:
         """确保索引已加载，返回是否成功"""

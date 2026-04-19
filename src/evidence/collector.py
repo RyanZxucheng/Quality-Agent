@@ -8,8 +8,7 @@
   最终：汇总为 EvidencePackage
 """
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from src.config import get_config
 from src.evidence.internal_search import InternalSearchExecutor
@@ -58,6 +57,14 @@ class EvidenceCollector:
 
     # ── 主入口 ────────────────────────────────────────────────────────────────
 
+    def warm_up(self) -> None:
+        """预加载所有子组件，避免并发时的懒加载竞争"""
+        self.self_checker.warm_up()
+        self.internal_searcher.warm_up()
+        self.external_runner.warm_up()
+        _ = self._get_reranker()
+        logger.debug("EvidenceCollector warmed up")
+
     def collect(self, qa_pair: QAPair) -> EvidencePackage:
         """
         执行证据收集
@@ -86,7 +93,7 @@ class EvidenceCollector:
 
         if round0.next_action == NextAction.SEARCH:
             # ── Round 1：内部检索 + 外部检索【并行】─────────────────────────
-            internal_context, external_evidence = self._run_parallel_search(
+            internal_context, external_evidence = self._run_search(
                 qa_pair, round0.missing_slots
             )
 
@@ -132,11 +139,14 @@ class EvidenceCollector:
 
     # ── 并行检索 ──────────────────────────────────────────────────────────────
 
-    def _run_parallel_search(
+    def _run_search(
         self, qa_pair: QAPair, missing_slots: str
     ) -> tuple[Optional[InternalContext], List[ExternalEvidence]]:
         """
-        内部检索与外部检索并行执行
+        内部检索与外部检索顺序执行
+
+        避免与 batch_processor 外层 ThreadPoolExecutor 嵌套，
+        因为 QA 级别的并行已足够利用 I/O 并发。
 
         Returns:
             (internal_context, external_evidence) 元组
@@ -151,37 +161,25 @@ class EvidenceCollector:
             logger.debug("Both internal and external search disabled, skipping Round 1")
             return internal_context, external_evidence
 
-        futures: Dict = {}
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            if internal_enabled:
-                futures["internal"] = executor.submit(
-                    self._run_internal_search, qa_pair, missing_slots
+        if internal_enabled:
+            try:
+                internal_context = self._run_internal_search(qa_pair, missing_slots)
+                logger.info(
+                    f"[Round 1/internal] {len(internal_context.chunks)} chunks retrieved"
                 )
-            if external_enabled:
-                futures["external"] = executor.submit(
-                    self._run_external_search, missing_slots
+            except Exception as e:
+                logger.error(f"Internal search failed: {e}")
+                internal_context = InternalContext(chunks=[])
+
+        if external_enabled:
+            try:
+                external_evidence = self._run_external_search(missing_slots)
+                logger.info(
+                    f"[Round 1/external] {len(external_evidence)} items fetched"
                 )
-
-            if "internal" in futures:
-                try:
-                    internal_context = futures["internal"].result()
-                    logger.info(
-                        f"[Round 1/internal] {len(internal_context.chunks)} chunks retrieved"
-                    )
-                except Exception as e:
-                    logger.error(f"Internal search thread failed: {e}")
-                    internal_context = InternalContext(chunks=[])
-
-            if "external" in futures:
-                try:
-                    external_evidence = futures["external"].result()
-                    logger.info(
-                        f"[Round 1/external] {len(external_evidence)} items fetched"
-                    )
-                except Exception as e:
-                    logger.error(f"External search thread failed: {e}")
-                    external_evidence = []
+            except Exception as e:
+                logger.error(f"External search failed: {e}")
+                external_evidence = []
 
         return internal_context, external_evidence
 

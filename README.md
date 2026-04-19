@@ -233,6 +233,15 @@ python -m src.main \
   --max-retained 100
 ```
 
+**并行批次处理（提升 I/O 密集型场景速度）：**
+
+```bash
+python -m src.main --dataset data/input/example_qa.json \
+  --batch-size 5
+```
+
+`--batch-size` 大于 1 时自动启用并行模式，多个 QA 数据会按批次并发执行证据收集和评分。适合 LLM API 调用、外部检索等 I/O 密集型场景。
+
 完整参数可通过以下命令查看：
 
 ```bash
@@ -286,6 +295,7 @@ data/output/
 | `--accuracy-threshold` | 准确性阈值 | `35` |
 | `--checkpoint-interval` | 检查点间隔 | `100` |
 | `--max-retained` | 筛选出指定数量后停止 | `None` |
+| `--batch-size` | 每批次处理数量，`>1` 时启用并行 | `1` |
 | `-o`, `--output` | 输出目录 | `data/output` |
 
 ### YAML 配置文件

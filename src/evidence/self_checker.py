@@ -63,6 +63,18 @@ class SelfChecker:
         self.config = config or get_config().self_check
         self._system_prompt: Optional[str] = None
         self._llm_client = None
+        self._warm_up_lock = threading.Lock()
+
+    def warm_up(self) -> None:
+        """预加载，避免并发时的懒加载竞争（线程安全）"""
+        if self._system_prompt is not None and self._llm_client is not None:
+            return
+        with self._warm_up_lock:
+            if self._system_prompt is not None and self._llm_client is not None:
+                return
+            _ = self._get_system_prompt()
+            _ = self._get_llm_client()
+        logger.debug("SelfChecker warmed up")
 
     def _get_system_prompt(self) -> str:
         """读取 prompt 模板（文件不存在时使用内置默认值）"""

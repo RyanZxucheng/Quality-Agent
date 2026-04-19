@@ -67,6 +67,18 @@ def main():
         default=None,
         help="筛选出指定数量数据后停止（默认: 不限制）"
     )
+    def _positive_int(value):
+        iv = int(value)
+        if iv < 1:
+            raise argparse.ArgumentTypeError(f"batch-size must be >= 1, got {value}")
+        return iv
+
+    parser.add_argument(
+        "--batch-size",
+        type=_positive_int,
+        default=1,
+        help="每批次处理数量，大于 1 时启用并行处理（默认: 1）"
+    )
 
     # LLM 模型配置
     parser.add_argument(
@@ -124,6 +136,7 @@ def main():
         llm_temperature=args.llm_temperature,
         llm_max_tokens=args.llm_max_tokens,
         max_retained=args.max_retained,
+        batch_size=args.batch_size,
     )
     config.thresholds.total_min = args.total_threshold
     config.thresholds.accuracy_min = args.accuracy_threshold
@@ -140,6 +153,7 @@ def main():
     logger.info(f"准确性阈值: {args.accuracy_threshold}")
     if args.max_retained is not None:
         logger.info(f"最大保留数: {args.max_retained}")
+    logger.info(f"批次大小: {args.batch_size} ({'并行' if args.batch_size > 1 else '顺序'})")
 
     # 处理
     try:

@@ -12,9 +12,12 @@ import logging
 import json
 import shutil
 import subprocess
+import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+
+# 需要在顶部导入 threading（已存在），此处仅为标记修改位置
 
 import requests
 
@@ -47,6 +50,26 @@ class BaseExternalTool(ABC):
 
 # ── PubMed 工具 ───────────────────────────────────────────────────────────────
 
+# ── PubMed 全局速率限制 ───────────────────────────────────────────────────────
+
+_PUBMED_LOCK = threading.Lock()
+_PUBMED_LAST_CALL_TIME: float = 0.0
+_PUBMED_MIN_INTERVAL: float = 0.34  # NCBI 要求：无 key 时每秒最多 3 次请求
+
+
+def _pubmed_rate_limit_wait() -> None:
+    """线程安全的 PubMed 请求间隔控制（sleep 在锁内，确保严格串行）"""
+    global _PUBMED_LAST_CALL_TIME
+    with _PUBMED_LOCK:
+        now = time.time()
+        elapsed = now - _PUBMED_LAST_CALL_TIME
+        if elapsed < _PUBMED_MIN_INTERVAL:
+            time.sleep(_PUBMED_MIN_INTERVAL - elapsed)
+            _PUBMED_LAST_CALL_TIME = time.time()
+        else:
+            _PUBMED_LAST_CALL_TIME = now
+
+
 class PubMedTool(BaseExternalTool):
     """
     PubMed E-utilities 搜索工具
@@ -65,6 +88,7 @@ class PubMedTool(BaseExternalTool):
 
         results = []
         for pmid in pmids[: self.max_results]:
+            _pubmed_rate_limit_wait()
             abstract = self._efetch_abstract(pmid)
             if abstract:
                 results.append(ExternalEvidence(
@@ -74,12 +98,12 @@ class PubMedTool(BaseExternalTool):
                     url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
                     query_used=built_query,
                 ))
-            time.sleep(0.34)  # NCBI 要求：无 key 时每秒最多 3 次请求
 
         return results
 
     def _esearch(self, query: str) -> List[str]:
         """搜索 PubMed 返回 PMID 列表"""
+        _pubmed_rate_limit_wait()
         params = {
             "db": "pubmed",
             "term": query,
@@ -257,19 +281,23 @@ class BaiduSearchTool(BaseExternalTool):
     def __init__(self, tool_cfg, timeout: int = 10, max_results: int = 2):
         super().__init__(tool_cfg, timeout, max_results)
         self._session: Optional[requests.Session] = None
+        self._session_lock = threading.Lock()
 
     def _get_session(self) -> requests.Session:
-        """懒加载 Session，首次调用时访问百度首页获取 cookie"""
+        """懒加载 Session，首次调用时访问百度首页获取 cookie（线程安全）"""
         if self._session is not None:
             return self._session
-        session = requests.Session()
-        try:
-            session.get(self.HOME_URL, headers=self.HEADERS, timeout=self.timeout)
-            logger.debug("Baidu session initialized with cookies")
-        except Exception as e:
-            logger.warning(f"Baidu homepage prefetch failed (will retry on search): {e}")
-        self._session = session
-        return self._session
+        with self._session_lock:
+            if self._session is not None:
+                return self._session
+            session = requests.Session()
+            try:
+                session.get(self.HOME_URL, headers=self.HEADERS, timeout=self.timeout)
+                logger.debug("Baidu session initialized with cookies")
+            except Exception as e:
+                logger.warning(f"Baidu homepage prefetch failed (will retry on search): {e}")
+            self._session = session
+            return self._session
 
     def search(self, query: str) -> List[ExternalEvidence]:
         try:
@@ -564,6 +592,7 @@ class ExternalSearchRunner:
     def __init__(self, config: Optional[ExternalSearchConfig] = None):
         self.config = config or get_config().external_search
         self._tools: Optional[List[BaseExternalTool]] = None
+        self._warm_up_lock = threading.Lock()
 
     def _build_tools(self) -> List[BaseExternalTool]:
         """构建已启用的工具列表（按配置列表顺序）"""
@@ -575,6 +604,16 @@ class ExternalSearchRunner:
                 continue
             tools.append(cls(tool_cfg, timeout=self.config.timeout, max_results=self.config.max_results_per_tool))
         return tools
+
+    def warm_up(self) -> None:
+        """预加载工具列表，避免并发时的懒加载竞争（线程安全）"""
+        if self._tools is not None:
+            return
+        with self._warm_up_lock:
+            if self._tools is not None:
+                return
+            self._tools = self._build_tools()
+        logger.debug(f"ExternalSearchRunner warmed up with {len(self._tools)} tools")
 
     def fetch(self, missing_slots: str) -> List[ExternalEvidence]:
         """
