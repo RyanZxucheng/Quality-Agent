@@ -229,6 +229,121 @@ class Symbols:
     WARNING = '[WARN]'
 
 
+# 错误详情打印机
+class ErrorDetailsPrinter:
+    """错误详情打印机 - 负责收集和格式化测试失败的详细错误信息"""
+
+    def __init__(self, runner):
+        """初始化错误详情打印机
+
+        Args:
+            runner: BeautifulTestRunner 实例，用于获取颜色样式等配置
+        """
+        self.runner = runner
+        self.failure_details = []  # 存储失败详情 [(test, err, type)]
+        self.error_details = []    # 存储错误详情 [(test, err, type)]
+
+    def collect(self, results):
+        """从测试结果中收集错误信息
+
+        Args:
+            results: unittest.TestResult 对象
+        """
+        # 收集失败信息
+        for test, err in results.failures:
+            self.failure_details.append((test, err, "FAILURE"))
+
+        # 收集错误信息
+        for test, err in results.errors:
+            self.error_details.append((test, err, "ERROR"))
+
+    def has_errors(self):
+        """检查是否有错误或失败"""
+        return len(self.failure_details) > 0 or len(self.error_details) > 0
+
+    def print(self):
+        """打印错误详情区域"""
+        if not self.has_errors():
+            return
+
+        # 打印错误详情标题
+        if self.runner.supports_color:
+            print(f"\n{self.runner.styles['title']}[ERROR DETAILS]{self.runner.styles['reset']}")
+            print(f"{self.runner.styles['dim']}{'-' * 50}{self.runner.styles['reset']}")
+        else:
+            print("\n[ERROR DETAILS]")
+            print("-" * 50)
+
+        # 打印所有失败
+        all_details = self.failure_details + self.error_details
+        for idx, (test, err, error_type) in enumerate(all_details, 1):
+            self._print_single_error(idx, test, err, error_type)
+
+    def _print_single_error(self, index: int, test, err, error_type: str):
+        """打印单个错误的详细信息
+
+        Args:
+            index: 错误序号
+            test: 测试实例
+            err: 错误元组 (exc_type, exc_value, exc_traceback)
+            error_type: 错误类型 ("FAILURE" 或 "ERROR")
+        """
+        # 格式化测试名称
+        test_name = self.runner._format_test_name(test)
+        category = self.runner._get_test_category(test)
+
+        # 根据分类添加前缀（与测试输出保持一致）
+        if category == 'internal':
+            prefix = '[Internal] '
+        elif category == 'external_tool':
+            if 'PubMed' in test_name:
+                prefix = '[PubMed]   '
+            elif 'Bing' in test_name:
+                prefix = '[Bing]     '
+            elif '百度' in test_name:
+                prefix = '[Baidu]    '
+            elif 'Exa' in test_name:
+                prefix = '[Exa MCP]  '
+            else:
+                prefix = '[External] '
+        elif category == 'external_runner':
+            prefix = '[ExtRunner]'
+        elif category == 'rerank':
+            prefix = '[Reranker] '
+        else:
+            prefix = '[Other]    '
+
+        # 打印错误标题
+        if self.runner.supports_color:
+            error_color = self.runner.styles['fail']
+            test_color = self.runner.styles['warning']
+            reset = self.runner.styles['reset']
+            dim = self.runner.styles['dim']
+
+            print(f"\n{prefix} {error_color}[{error_type}]{reset} {test_color}{test_name}{reset}")
+            print(f"{dim}{'─' * 60}{reset}")
+        else:
+            print(f"\n{prefix} [{error_type}] {test_name}")
+            print("-" * 60)
+
+        # 提取并格式化堆栈跟踪
+        exc_type, exc_value, exc_traceback = err
+
+        # 使用 traceback 模块格式化错误
+        import traceback
+        tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+
+        # 打印完整的堆栈跟踪
+        for line in tb_lines:
+            # 清理行尾空白
+            line = line.rstrip()
+            if self.runner.supports_color:
+                # 对堆栈跟踪行使用较暗的颜色
+                print(f"{dim}{line}{reset}")
+            else:
+                print(line)
+
+
 class BeautifulTestRunner(unittest.TextTestRunner):
     """美观的测试运行器"""
 
@@ -238,6 +353,9 @@ class BeautifulTestRunner(unittest.TextTestRunner):
         self.supports_color = _supports_color()
         self.test_results: List[Dict] = []
         self.start_time = 0
+
+        # 初始化错误详情打印机
+        self.error_printer = ErrorDetailsPrinter(self)
 
         # 颜色启用时的样式
         if self.supports_color:
@@ -488,6 +606,10 @@ class BeautifulTestRunner(unittest.TextTestRunner):
 
         # 打印总结
         self._print_summary(result)
+
+        # 收集并打印错误详情
+        self.error_printer.collect(result)
+        self.error_printer.print()
 
         return result
 
