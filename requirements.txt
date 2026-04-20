@@ -1,3 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1+cu121
+torchvision==0.20.1+cu121
+torchaudio==2.5.1+cu121
+
 # Core framework
 anthropic>=0.21.0
 openai>=1.0.0  # 用于 vLLM/OpenAI 兼容接口
@@ -19,7 +24,7 @@ sentence-transformers>=3.0.0
 # 推荐模型会在首次使用时自动下载：BAAI/bge-reranker-base
 #
 # Cohere API（backend: cohere）：
-cohere>=5.0.0
+# cohere>=5.0.0
 #
 # Jina API（backend: jina）：无需额外依赖，使用内置 requests
 

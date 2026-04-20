@@ -35,6 +35,13 @@ class TestSearchAvailability(unittest.TestCase):
     def setUpClass(cls):
         cls.config = get_config()
 
+    @staticmethod
+    def _build_test_missing_slot(query_template: str) -> str:
+        """根据工具查询模板生成测试用 missing_slot。"""
+        template = (query_template or "{missing_slot}").strip()
+        generated = template.replace("{missing_slot}", "").strip()
+        return generated or "medical evidence"
+
     # -- 内部检索 -----------------------------------------------------------
 
     def test_internal_search(self):
@@ -63,7 +70,7 @@ class TestSearchAvailability(unittest.TestCase):
 
     # -- 外部检索 -----------------------------------------------------------
 
-    def _test_external_tool(self, tool_name: str, query: str = "diabetes treatment clinical evidence"):
+    def _test_external_tool(self, tool_name: str, query: Optional[str] = None):
         """测试单个外部检索工具"""
         cfg = self.config.external_search
         if not cfg.enabled:
@@ -83,8 +90,9 @@ class TestSearchAvailability(unittest.TestCase):
         if cls is None:
             self.fail(f"Tool '{tool_name}' not found in registry")
 
+        query_to_use = query or self._build_test_missing_slot(tool_cfg.query_template)
         tool = cls(tool_cfg, timeout=cfg.timeout, max_results=cfg.max_results_per_tool)
-        results = tool.search(query)
+        results = tool.search(query_to_use)
 
         self.assertIsNotNone(
             results,
@@ -124,7 +132,16 @@ class TestSearchAvailability(unittest.TestCase):
         if not runner._tools:
             self.skipTest("No external tools available")
 
-        results = runner.fetch("diabetes treatment guidelines")
+        loaded_tool_names = {tool.name for tool in runner._tools}
+        enabled_tool_cfg = next(
+            (t for t in cfg.tools if t.enabled and t.name in loaded_tool_names),
+            None,
+        )
+        if enabled_tool_cfg is None:
+            self.skipTest("No enabled and loadable tools found in config")
+
+        missing_slot = self._build_test_missing_slot(enabled_tool_cfg.query_template)
+        results = runner.fetch(missing_slot)
         self.assertIsNotNone(results)
         # 将结果信息存储在测试实例中
         self._test_result_info = f"返回 {len(results)} 条总结果"
@@ -137,6 +154,8 @@ class TestSearchAvailability(unittest.TestCase):
         if not cfg.enabled:
             self.skipTest("Config disabled")
 
+        configured_top_n = max(1, int(cfg.top_n))
+
         try:
             reranker = create_reranker(cfg)
         except Exception as e:
@@ -148,16 +167,31 @@ class TestSearchAvailability(unittest.TestCase):
         # 构造候选数据做简单测试
         from src.models import RankedResult
         candidates = [
-            RankedResult(source="internal", content="diabetes type 2 management", relevance_score=0.0),
-            RankedResult(source="external", content="insulin therapy guidelines", relevance_score=0.0),
+            RankedResult(
+                source="internal" if i % 2 == 0 else "external",
+                content=f"test candidate {i} for rerank",
+                relevance_score=0.0,
+            )
+            for i in range(configured_top_n + 1)
         ]
 
         try:
-            ranked = reranker.rerank("diabetes treatment", candidates, top_n=2)
+            ranked = reranker.rerank(
+                "diabetes treatment",
+                candidates,
+                top_n=configured_top_n,
+            )
             self.assertIsNotNone(ranked)
+            self.assertLessEqual(
+                len(ranked),
+                configured_top_n,
+                f"Reranker returned {len(ranked)} results, expected <= {configured_top_n}",
+            )
             # 将结果信息存储在测试实例中
             backend_info = f" ({cfg.backend})" if hasattr(cfg, 'backend') else ""
-            self._test_result_info = f"返回 {len(ranked)} 条结果{backend_info}"
+            self._test_result_info = (
+                f"返回 {len(ranked)} 条结果{backend_info} (top_n={configured_top_n})"
+            )
         except Exception as e:
             self.fail(f"Reranker execution failed: {e}")
 
