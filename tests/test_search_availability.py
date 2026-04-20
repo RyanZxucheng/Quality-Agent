@@ -285,7 +285,7 @@ class ErrorDetailsPrinter:
         Args:
             index: 错误序号
             test: 测试实例
-            err: 错误元组 (exc_type, exc_value, exc_traceback)
+            err: 错误详情，可能是 traceback 字符串或异常三元组
             error_type: 错误类型 ("FAILURE" 或 "ERROR")
         """
         # 格式化测试名称
@@ -326,12 +326,16 @@ class ErrorDetailsPrinter:
             print(f"\n{prefix} [{error_type}] {test_name}")
             print("-" * 60)
 
-        # 提取并格式化堆栈跟踪
-        exc_type, exc_value, exc_traceback = err
-
-        # 使用 traceback 模块格式化错误
+        # 提取并格式化堆栈跟踪。
+        # unittest.TextTestResult 中 failures/errors 默认保存的是字符串 traceback。
         import traceback
-        tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+        if isinstance(err, tuple) and len(err) >= 3:
+            exc_type, exc_value, exc_traceback = err[:3]
+            tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+        elif isinstance(err, str):
+            tb_lines = err.splitlines()
+        else:
+            tb_lines = [str(err)]
 
         # 打印完整的堆栈跟踪
         for line in tb_lines:
