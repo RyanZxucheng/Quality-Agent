@@ -24,7 +24,8 @@
   - [2. 安装依赖](#2-安装依赖)
   - [3. 配置 LLM](#3-配置-llm)
   - [4. 准备输入数据](#4-准备输入数据)
-  - [5. 运行评估](#5-运行评估)
+  - [5. 模块测试（推荐）](#5-模块测试推荐)
+  - [6. 运行评估](#6-运行评估)
 - [输出结果](#输出结果)
 - [配置说明](#配置说明)
   - [CLI 参数](#cli-参数)
@@ -180,7 +181,45 @@ export OPENAI_API_KEY="sk-..."
 
 仓库内置示例文件：[data/input/example_qa.json](data/input/example_qa.json)。
 
-### 5. 运行评估
+### 5. 模块测试（推荐）
+
+**强烈建议在运行主流程前先运行测试**，以验证当前配置下启用的检索功能是否真正可用：
+
+```bash
+python tests/test_search_availability.py
+```
+
+该测试使用 **BeautifulTestRunner**，提供美观的彩色输出和详细的错误信息：
+
+```
+[TEST] Search Availability Check - Starting
+--------------------------------------------------
+
+[Internal]  [PASS] Internal Search (0.12s)
+[PubMed]    [PASS] PubMed (0.45s)
+...
+--------------------------------------------------
+[SUMMARY] Test Summary
+├── Passed: 5
+├── Skipped: 2
+└── Failed: 0
+   Time: 2.15s
+
+[CONFIG] Config Status
+[PASS] Internal Search
+[PASS] External Search
+[PASS] Reranker
+```
+
+测试会根据配置自动检测：
+
+- **内部检索**：索引文件是否存在、能否正常搜索
+- **外部检索**：每个启用的工具（PubMed / Bing / 百度 / Exa MCP）能否返回结果
+- **Reranker**：能否正常初始化和执行重排
+
+若某项检索测试失败，可以根据错误详情中的堆栈跟踪信息排查问题，修复后再运行主流程。
+
+### 6. 运行评估
 
 **最简运行：**
 
@@ -247,44 +286,6 @@ python -m src.main --dataset data/input/example_qa.json \
 ```bash
 python -m src.main --help
 ```
-
-### 6. 模块测试（推荐）
-
-**强烈建议在运行主流程前先运行测试**，以验证当前配置下启用的检索功能是否真正可用：
-
-```bash
-python tests/test_search_availability.py
-```
-
-该测试使用 **BeautifulTestRunner**，提供美观的彩色输出和详细的错误信息：
-
-```
-[TEST] Search Availability Check - Starting
---------------------------------------------------
-
-[Internal]  [PASS] Internal Search (0.12s)
-[PubMed]    [PASS] PubMed (0.45s)
-...
---------------------------------------------------
-[SUMMARY] Test Summary
-├── Passed: 5
-├── Skipped: 2
-└── Failed: 0
-   Time: 2.15s
-
-[CONFIG] Config Status
-[PASS] Internal Search
-[PASS] External Search
-[PASS] Reranker
-```
-
-测试会根据配置自动检测：
-
-- **内部检索**：索引文件是否存在、能否正常搜索
-- **外部检索**：每个启用的工具（PubMed / Bing / 百度 / Exa MCP）能否返回结果
-- **Reranker**：能否正常初始化和执行重排
-
-若某项检索测试失败，可以根据错误详情中的堆栈跟踪信息排查问题，修复后再运行主流程。
 
 ---
 
