@@ -39,6 +39,7 @@ class QAPair:
     question: str = ""
     answer: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
+    raw_data: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.question or not self.answer:

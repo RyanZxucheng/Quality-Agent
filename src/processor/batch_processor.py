@@ -258,11 +258,15 @@ class BatchProcessor:
         excluded_keys = {"id", "ID", "question", "Question", "q", "answer", "Answer", "a", "messages"}
         metadata = {k: v for k, v in item.items() if k not in excluded_keys}
 
+        # 保留原始输入数据的完整副本，用于输出时保持格式一致
+        raw_data = dict(item)
+
         return QAPair(
             id=str(qa_id),
             question=str(question),
             answer=str(answer),
-            metadata=metadata
+            metadata=metadata,
+            raw_data=raw_data
         )
 
     def _format_output(
@@ -271,36 +275,8 @@ class BatchProcessor:
         evidence: Any,
         evaluation: EvaluationResult
     ) -> Dict[str, Any]:
-        """格式化输出"""
-        from src.models import EvidencePackage
-        evidence_info = {}
-        if isinstance(evidence, EvidencePackage):
-            evidence_info = {
-                "rounds_executed": evidence.rounds_executed,
-                "evidence_insufficient": evidence.evidence_insufficient,
-                "internal_chunks": (
-                    len(evidence.internal_context.chunks)
-                    if evidence.internal_context else 0
-                ),
-                "external_sources": len(evidence.external_evidence),
-            }
-
-        return {
-            "id": qa_pair.id,
-            "question": qa_pair.question,
-            "answer": qa_pair.answer,
-            "evidence": evidence_info,
-            "metadata": qa_pair.metadata,
-            "scores": {
-                "total": evaluation.scores.total_score,
-                "dimensions": {
-                    d.name: d.score
-                    for d in evaluation.scores.dimensions
-                }
-            },
-            "conclusion": evaluation.conclusion.value,
-            "conclusion_reason": evaluation.reason,
-        }
+        """格式化输出——保持与输入格式一致，不新增字段"""
+        return qa_pair.raw_data
 
     def _create_error_result(self, qa_pair: QAPair, error: str) -> EvaluationResult:
         """创建错误结果"""

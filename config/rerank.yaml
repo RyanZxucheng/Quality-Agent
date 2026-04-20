@@ -12,7 +12,7 @@ local:
   #   BAAI/bge-reranker-base        （轻量，~1GB，CPU 友好）
   #   BAAI/bge-reranker-large       （精度更高，CPU 稍慢）
   #   cross-encoder/ms-marco-MiniLM-L-6-v2  （英文优化，较小）
-  model_name: Qwen/Qwen3-Reranker-4B
+  model_name: Qwen/Qwen3-Reranker-0.6B
   device: cuda:3       # cpu | cuda（有 GPU 时改为 cuda 可加速）
   batch_size: 10
 

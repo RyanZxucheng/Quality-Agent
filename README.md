@@ -73,11 +73,11 @@ Quality-Agent 不是生成式问答系统，而是一个**数据质检 Agent**�
 
 ```text
     ┌─────────────┐         ┌─────────────┐     ┌─────────────┐
-    │   Round 0   │   Yes   │  Round 1    │     │   Rerank    │
+    │   Round 0   │   No    │  Round 1    │     │   Rerank    │
     │    自检     ├────────>│    检索     │────>│   (可选)    │
     └──────┬──────┘         └─────────────┘     └──────┬──────┘
            │                                            │
-           │ No                                         │
+           │ Yes                                        │
            │                                            │
            │              ┌─────────────┐               │
            └─────────────>│  LLM 评分   │<──────────────┘
@@ -247,6 +247,22 @@ python -m src.main --dataset data/input/example_qa.json \
 ```bash
 python -m src.main --help
 ```
+
+### 6. 预检测试（可选）
+
+运行评估前，可以先验证当前配置下启用的检索功能是否真正可用：
+
+```bash
+python -m unittest tests.test_search_availability -v
+```
+
+测试会根据配置自动检测：
+
+- **内部检索**：索引文件是否存在、能否正常搜索
+- **外部检索**：每个启用的工具（PubMed / Bing / 百度 / Exa MCP）能否返回结果
+- **Reranker**：能否正常初始化和执行重排
+
+未启用的功能会自动标记为 `skipped`，无需手动调整。若某项检索测试失败，可以根据报错信息排查后再运行主流程。
 
 ---
 
