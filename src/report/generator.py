@@ -135,16 +135,92 @@ class ReportGenerator:
         """序列化单个结果"""
         evidence = result.evidence
         evidence_data: Dict[str, Any] = {}
+        self_check_data: List[Dict[str, Any]] = []
 
         if evidence is not None:
             from src.models import EvidencePackage
             if isinstance(evidence, EvidencePackage):
-                evidence_data = self._serialize_evidence_package(evidence)
+                # 提取自检轮次数据
+                self_check_data = [
+                    {
+                        "confidence": round(r.confidence, 3),
+                        "next_action": r.next_action.value,
+                        "blocking_issues": r.blocking_issues,
+                        "missing_slots": r.missing_slots,
+                        "reasoning": r.reasoning,
+                    }
+                    for r in evidence.self_check_rounds
+                ]
+
+                # 构建 evidence 数据
+                # 如果启用了 reranker 且有排序结果，只保留 ranked_results
+                if evidence.ranked_results:
+                    ranked_data = []
+                    for rr in evidence.ranked_results:
+                        item = {
+                            "source": rr.source,
+                            "content_preview": rr.content[:200],
+                            "relevance_score": round(rr.relevance_score, 3),
+                        }
+                        # 根据来源添加原始数据
+                        if rr.source == "internal" and rr.chunk:
+                            item.update({
+                                "doc_id": rr.chunk.doc_id,
+                                "chunk_id": rr.chunk.chunk_id,
+                                "original_relevance": round(rr.chunk.relevance_score, 3),
+                            })
+                        elif rr.source == "external" and rr.evidence:
+                            item.update({
+                                "tool": rr.evidence.tool_name,
+                                "source_name": rr.evidence.source,
+                                "url": rr.evidence.url,
+                                "query_used": rr.evidence.query_used,
+                            })
+                        ranked_data.append(item)
+
+                    evidence_data = {
+                        "ranked_results": ranked_data,
+                        "total_ranked": len(evidence.ranked_results),
+                    }
+                else:
+                    # 未启用 reranker，保留原始的 internal 和 external
+                    internal_data = None
+                    if evidence.internal_context and evidence.internal_context.chunks:
+                        ic = evidence.internal_context
+                        internal_data = {
+                            "chunks_retrieved": len(ic.chunks),
+                            "top_chunks": [
+                                {
+                                    "doc_id": c.doc_id,
+                                    "chunk_id": c.chunk_id,
+                                    "relevance_score": round(c.relevance_score, 3),
+                                    "content_preview": c.content[:150],
+                                }
+                                for c in ic.chunks[:3]
+                            ],
+                        }
+
+                    external_data = [
+                        {
+                            "tool": e.tool_name,
+                            "source": e.source,
+                            "url": e.url,
+                            "snippet": e.snippet,
+                            "query_used": e.query_used,
+                        }
+                        for e in evidence.external_evidence
+                    ]
+
+                    evidence_data = {
+                        "internal": internal_data,
+                        "external": external_data,
+                    }
 
         return {
             "id": result.qa_pair.id,
             "question": result.qa_pair.question,
             "answer": result.qa_pair.answer,
+            "self_check_rounds": self_check_data,
             "evidence": evidence_data,
             "scores": {
                 "total": result.scores.total_score,
@@ -158,51 +234,6 @@ class ReportGenerator:
             "reason": result.reason,
         }
 
-    def _serialize_evidence_package(self, pkg: "EvidencePackage") -> Dict[str, Any]:
-        """序列化 EvidencePackage 为可读字典"""
-        self_check_data = [
-            {
-                "confidence": round(r.confidence, 3),
-                "next_action": r.next_action.value,
-                "blocking_issues": r.blocking_issues,
-                "missing_slots": r.missing_slots,
-                "reasoning": r.reasoning,
-            }
-            for r in pkg.self_check_rounds
-        ]
-
-        internal_data = None
-        if pkg.internal_context and pkg.internal_context.chunks:
-            ic = pkg.internal_context
-            internal_data = {
-                "chunks_retrieved": len(ic.chunks),
-                "top_chunks": [
-                    {
-                        "doc_id": c.doc_id,
-                        "chunk_id": c.chunk_id,
-                        "relevance_score": round(c.relevance_score, 3),
-                        "content_preview": c.content[:150],
-                    }
-                    for c in ic.chunks[:3]
-                ],
-            }
-
-        external_data = [
-            {
-                "tool": e.tool_name,
-                "source": e.source,
-                "url": e.url,
-                "snippet": e.snippet,
-                "query_used": e.query_used,
-            }
-            for e in pkg.external_evidence
-        ]
-
-        return {
-            "self_check_rounds": self_check_data,
-            "internal": internal_data,
-            "external": external_data,
-        }
 
     def _generate_summary_text(self, report: EvaluationReport) -> str:
         """生成文本摘要（含多轮证据统计）"""
