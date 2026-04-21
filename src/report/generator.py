@@ -199,8 +199,6 @@ class ReportGenerator:
         ]
 
         return {
-            "rounds_executed": pkg.rounds_executed,
-            "evidence_insufficient": pkg.evidence_insufficient,
             "self_check_rounds": self_check_data,
             "internal": internal_data,
             "external": external_data,
@@ -210,7 +208,6 @@ class ReportGenerator:
         """生成文本摘要（含多轮证据统计）"""
         internal_used = 0
         external_used = 0
-        insufficient_count = 0
 
         from src.models import EvidencePackage
         for r in report.results:
@@ -220,8 +217,6 @@ class ReportGenerator:
                     internal_used += 1
                 if pkg.external_evidence:
                     external_used += 1
-                if pkg.evidence_insufficient:
-                    insufficient_count += 1
 
         lines = [
             "=" * 60,
@@ -245,7 +240,6 @@ class ReportGenerator:
             "-" * 60,
             f"触发内部检索: {internal_used} 条",
             f"触发外部检索: {external_used} 条",
-            f"证据不足（待人工复核）: {insufficient_count} 条",
             "",
             "-" * 60,
             "各维度平均分数",

@@ -15,7 +15,7 @@ from src.evidence import EvidenceCollector
 from src.scoring.llm_engine import LLMScoringEngine
 from src.decision import DecisionEngine
 from src.config import get_config
-from src.utils.file_utils import safe_read_json, safe_read_jsonl, safe_read_csv, ensure_dir, write_jsonl
+from src.utils.file_utils import safe_read_json, safe_read_jsonl, safe_read_csv, ensure_dir
 
 logger = logging.getLogger(__name__)
 
@@ -317,13 +317,15 @@ class BatchProcessor:
         if retained:
             cleaned_dir = output_path / "cleaned_data"
             ensure_dir(str(cleaned_dir))
-            write_jsonl(retained, str(cleaned_dir / "retained_qa.jsonl"))
+            with open(cleaned_dir / "retained_qa.json", "w", encoding="utf-8") as f:
+                json.dump(retained, f, ensure_ascii=False, indent=2)
 
         # 保存丢弃的数据（只在有数据时保存）
         if discarded:
             rejected_dir = output_path / "rejected"
             ensure_dir(str(rejected_dir))
-            write_jsonl(discarded, str(rejected_dir / "discarded_qa.jsonl"))
+            with open(rejected_dir / "discarded_qa.json", "w", encoding="utf-8") as f:
+                json.dump(discarded, f, ensure_ascii=False, indent=2)
 
         # 生成并保存报告
         from src.report import ReportGenerator
