@@ -8,6 +8,7 @@
   最终：汇总为 EvidencePackage
 """
 import logging
+import threading
 from typing import Any, List, Optional
 
 from src.config import get_config
@@ -143,10 +144,10 @@ class EvidenceCollector:
         self, qa_pair: QAPair, missing_slots: str
     ) -> tuple[Optional[InternalContext], List[ExternalEvidence]]:
         """
-        内部检索与外部检索顺序执行
+        内部检索与外部检索并行执行
 
-        避免与 batch_processor 外层 ThreadPoolExecutor 嵌套，
-        因为 QA 级别的并行已足够利用 I/O 并发。
+        内部检索（本地 BM25+TF-IDF）和外部检索（HTTP API）分别
+        在两个独立线程中运行，缩短单个 QA 的处理时间。
 
         Returns:
             (internal_context, external_evidence) 元组
@@ -161,25 +162,45 @@ class EvidenceCollector:
             logger.debug("Both internal and external search disabled, skipping Round 1")
             return internal_context, external_evidence
 
+        exceptions: List[Exception] = []
+        threads: List[threading.Thread] = []
+
         if internal_enabled:
-            try:
-                internal_context = self._run_internal_search(qa_pair, missing_slots)
-                logger.info(
-                    f"[Round 1/internal] {len(internal_context.chunks)} chunks retrieved"
-                )
-            except Exception as e:
-                logger.error(f"Internal search failed: {e}")
-                internal_context = InternalContext(chunks=[])
+            def _do_internal() -> None:
+                nonlocal internal_context
+                try:
+                    result = self._run_internal_search(qa_pair, missing_slots)
+                    internal_context = result
+                    logger.info(
+                        f"[Round 1/internal] {len(result.chunks)} chunks retrieved"
+                    )
+                except Exception as e:
+                    logger.error(f"Internal search failed: {e}")
+                    internal_context = InternalContext(chunks=[])
+                    exceptions.append(e)
+            t = threading.Thread(target=_do_internal, daemon=True)
+            t.start()
+            threads.append(t)
 
         if external_enabled:
-            try:
-                external_evidence = self._run_external_search(missing_slots)
-                logger.info(
-                    f"[Round 1/external] {len(external_evidence)} items fetched"
-                )
-            except Exception as e:
-                logger.error(f"External search failed: {e}")
-                external_evidence = []
+            def _do_external() -> None:
+                nonlocal external_evidence
+                try:
+                    result = self._run_external_search(missing_slots)
+                    external_evidence = result
+                    logger.info(
+                        f"[Round 1/external] {len(result)} items fetched"
+                    )
+                except Exception as e:
+                    logger.error(f"External search failed: {e}")
+                    external_evidence = []
+                    exceptions.append(e)
+            t = threading.Thread(target=_do_external, daemon=True)
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
 
         return internal_context, external_evidence
 

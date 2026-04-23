@@ -3,7 +3,9 @@ LLM 评分引擎
 基于工具收集的证据，使用 LLM 进行质量评分
 支持多种后端: Anthropic, vLLM, OpenAI
 """
+import asyncio
 import logging
+import threading
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Union
 
@@ -25,11 +27,11 @@ class LLMClient(ABC):
 
 
 class AnthropicClient(LLMClient):
-    """Anthropic Claude 客户端"""
+    """Anthropic Claude 客户端（底层使用 AsyncAnthropic）"""
 
     def __init__(self, model: str, api_key: str, temperature: float, max_tokens: int):
         try:
-            from anthropic import Anthropic
+            from anthropic import AsyncAnthropic
         except ImportError:
             raise ImportError("请安装 anthropic: pip install anthropic")
 
@@ -38,10 +40,23 @@ class AnthropicClient(LLMClient):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.client = Anthropic(api_key=api_key)
+        self.client = AsyncAnthropic(api_key=api_key)
+        self._loop_cache = threading.local()
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        if not hasattr(self._loop_cache, "loop"):
+            loop = asyncio.new_event_loop()
+            self._loop_cache.loop = loop
+        return self._loop_cache.loop
 
     def chat_completion(self, system_prompt: str, user_prompt: str) -> str:
-        response = self.client.messages.create(
+        loop = self._get_loop()
+        return loop.run_until_complete(
+            self._achat(system_prompt, user_prompt)
+        )
+
+    async def _achat(self, system_prompt: str, user_prompt: str) -> str:
+        response = await self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
             temperature=self.temperature,
@@ -53,7 +68,7 @@ class AnthropicClient(LLMClient):
 
 class OpenAICompatibleClient(LLMClient):
     """
-    OpenAI 兼容客户端
+    OpenAI 兼容客户端（底层使用 AsyncOpenAI）
     支持 vLLM, OpenAI, 或其他兼容 OpenAI API 的服务
     """
 
@@ -66,31 +81,44 @@ class OpenAICompatibleClient(LLMClient):
         api_key: str = ""
     ):
         try:
-            from openai import OpenAI
+            from openai import AsyncOpenAI
         except ImportError:
             raise ImportError("请安装 openai: pip install openai")
 
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self._loop_cache = threading.local()
 
         if base_url:
-            self.client = OpenAI(
+            self.client = AsyncOpenAI(
                 base_url=base_url,
                 api_key=api_key or "not-needed"
             )
         else:
             if not api_key:
                 raise ValueError("OpenAI API key not provided")
-            self.client = OpenAI(api_key=api_key)
+            self.client = AsyncOpenAI(api_key=api_key)
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        if not hasattr(self._loop_cache, "loop"):
+            loop = asyncio.new_event_loop()
+            self._loop_cache.loop = loop
+        return self._loop_cache.loop
 
     def chat_completion(self, system_prompt: str, user_prompt: str) -> str:
+        loop = self._get_loop()
+        return loop.run_until_complete(
+            self._achat(system_prompt, user_prompt)
+        )
+
+    async def _achat(self, system_prompt: str, user_prompt: str) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             max_tokens=self.max_tokens,
@@ -171,7 +199,14 @@ Answer: {answer}
         self.temperature = temperature if temperature is not None else config.llm_temperature
         self.max_tokens = max_tokens if max_tokens is not None else config.llm_max_tokens
 
-        self.client = self._create_client()
+        # 每个线程持有独立的异步客户端实例（AsyncAnthropic/AsyncOpenAI 不是线程安全的）
+        self._client_local = threading.local()
+
+    def _get_client(self) -> LLMClient:
+        """按线程获取独立的 LLM 客户端实例"""
+        if not hasattr(self._client_local, "client"):
+            self._client_local.client = self._create_client()
+        return self._client_local.client
 
     def _create_client(self) -> LLMClient:
         """根据配置创建 LLM 客户端"""
@@ -207,9 +242,10 @@ Answer: {answer}
             evidence_summary=evidence.get("evidence_summary", "无证据")
         )
 
-        # 调用 LLM
+        # 调用 LLM（按线程取独立客户端实例）
         try:
-            content = self.client.chat_completion(self.SYSTEM_PROMPT, prompt)
+            client = self._get_client()
+            content = client.chat_completion(self.SYSTEM_PROMPT, prompt)
             result = self._parse_json(content)
 
             # 构建 ScoreResult

@@ -5,6 +5,7 @@
 """
 import json
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -37,6 +38,8 @@ class BatchProcessor:
         self.evidence_collector = evidence_collector or EvidenceCollector()
         self.llm_scoring_engine = llm_scoring_engine or LLMScoringEngine()
         self.decision_engine = decision_engine or DecisionEngine()
+        # 检查点写入锁，防止后台线程重叠写入
+        self._checkpoint_lock = threading.Lock()
 
     def process_file(
         self,
@@ -66,7 +69,7 @@ class BatchProcessor:
 
         # 根据配置选择处理模式
         if self.config.is_parallel:
-            logger.info(f"Parallel mode: batch_size={self.config.batch_size}, workers={self.config.max_workers}")
+            logger.info(f"Parallel mode: batch_size={self.config.batch_size}")
             self.evidence_collector.warm_up()
             return self._process_parallel(
                 qa_pairs, output_dir, checkpoint_interval, max_retained
@@ -136,53 +139,57 @@ class BatchProcessor:
         checkpoint_interval: int,
         max_retained: Optional[int],
     ) -> EvaluationSummary:
-        """并行批次处理模式"""
+        """并行处理模式——流式批次提交
+
+        batch_size = 每批同时在处理的数据条数（并发度）。
+        始终保持最多 batch_size 个任务在运行：先提交第一批，
+        后续每完成一个就补充一个，无批次间等待，也避免一次性
+        提交全部任务造成的内存堆积。
+        """
         results: List[EvaluationResult] = []
         retained_data: List[Dict[str, Any]] = []
         discarded_data: List[Dict[str, Any]] = []
 
         batch_size = self.config.batch_size
-        max_workers = self.config.max_workers
         total = len(qa_pairs)
-        processed = 0
+        stopped = False
 
         pbar = tqdm(total=total, desc="Processing")
+        qa_iter = iter(enumerate(qa_pairs))
+        pending_futures: Dict[Any, int] = {}
+
+        def _submit_next() -> bool:
+            """提交下一个任务，返回是否成功提交"""
+            nonlocal stopped
+            if stopped:
+                return False
+            try:
+                idx, qa = next(qa_iter)
+                future = executor.submit(self._process_single, qa)
+                pending_futures[future] = idx
+                return True
+            except StopIteration:
+                return False
 
         try:
-            while processed < total:
-                # 早停检查：允许最多超发 batch_size-1 条
-                if max_retained is not None and len(retained_data) >= max_retained:
-                    logger.info(f"Reached max retained limit ({max_retained}), stopping early.")
-                    break
-
-                # 切分当前批次
-                batch = qa_pairs[processed : processed + batch_size]
-                qa_to_index = {id(qa): i for i, qa in enumerate(batch)}
-                batch_results: List[Tuple[QAPair, EvaluationResult, Optional[Dict[str, Any]]]] = []
-
-                # 并行执行当前批次
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    future_to_qa = {
-                        executor.submit(self._process_single, qa): qa for qa in batch
-                    }
-                    for future in as_completed(future_to_qa):
-                        try:
-                            batch_results.append(future.result())
-                        except Exception as e:
-                            qa = future_to_qa[future]
-                            logger.error(f"Future failed for {qa.id}: {e}")
-                            evaluation = self._create_error_result(qa, str(e))
-                            batch_results.append((qa, evaluation, None))
-
-                # 按原始顺序整理批次结果（保持输出稳定性）
-                batch_results.sort(key=lambda x: qa_to_index[id(x[0])])
-
-                # 在主线程更新结果（保证 checkpoint 同步安全）
-                for qa_pair, evaluation, output in batch_results:
-                    # 严格早停：逐条检查避免超发
-                    if max_retained is not None and len(retained_data) >= max_retained:
-                        logger.info(f"Reached max retained limit ({max_retained}), stopping early.")
+            with ThreadPoolExecutor(max_workers=batch_size) as executor:
+                # 先提交第一批任务，填满并发槽位
+                for _ in range(batch_size):
+                    if not _submit_next():
                         break
+
+                while pending_futures:
+                    future = next(as_completed(pending_futures))
+                    idx = pending_futures.pop(future)
+
+                    # 取结果
+                    try:
+                        qa_pair, evaluation, output = future.result()
+                    except Exception as e:
+                        qa_pair = qa_pairs[idx]
+                        logger.error(f"Future failed for {qa_pair.id}: {e}")
+                        evaluation = self._create_error_result(qa_pair, str(e))
+                        output = None
 
                     results.append(evaluation)
                     if output is not None:
@@ -190,12 +197,26 @@ class BatchProcessor:
                             retained_data.append(output)
                         else:
                             discarded_data.append(output)
-                    processed += 1
+
                     pbar.update(1)
 
-                # 保存检查点（按已处理数量判断）
-                if processed % checkpoint_interval == 0:
-                    self._save_checkpoint(output_dir, results, retained_data, discarded_data)
+                    # 检查点
+                    if len(results) % checkpoint_interval == 0:
+                        self._save_checkpoint(output_dir, results, retained_data, discarded_data)
+
+                    # 早停判断
+                    if max_retained is not None and len(retained_data) >= max_retained:
+                        logger.info(f"Reached max retained limit ({max_retained}), stopping early.")
+                        stopped = True
+                        # 取消尚未开始的任务
+                        for f in list(pending_futures.keys()):
+                            if not f.done():
+                                f.cancel()
+                        pending_futures.clear()
+                        break
+
+                    # 补充新任务，维持并发度
+                    _submit_next()
         finally:
             pbar.close()
 
@@ -289,19 +310,38 @@ class BatchProcessor:
         retained: List[Dict],
         discarded: List[Dict]
     ):
-        """保存检查点"""
-        checkpoint_dir = Path(output_dir) / "checkpoint"
-        checkpoint_dir.mkdir(exist_ok=True)
+        """保存检查点（异步，后台线程写入，不阻塞处理）"""
+        threading.Thread(
+            target=self._save_checkpoint_sync,
+            args=(output_dir, len(results), len(retained), len(discarded)),
+            daemon=True,
+        ).start()
 
-        # 保存检查点
-        with open(checkpoint_dir / "checkpoint.json", "w", encoding="utf-8") as f:
-            json.dump({
-                "processed_count": len(results),
-                "retained_count": len(retained),
-                "discarded_count": len(discarded)
-            }, f, ensure_ascii=False, indent=2)
-
-        logger.debug(f"Checkpoint saved: {len(results)} processed")
+    def _save_checkpoint_sync(
+        self,
+        output_dir: str,
+        processed_count: int,
+        retained_count: int,
+        discarded_count: int,
+    ):
+        """检查点同步写入（在后台线程中执行）"""
+        if not self._checkpoint_lock.acquire(blocking=False):
+            logger.debug("Checkpoint write already in progress, skipping")
+            return
+        try:
+            checkpoint_dir = Path(output_dir) / "checkpoint"
+            checkpoint_dir.mkdir(exist_ok=True)
+            with open(checkpoint_dir / "checkpoint.json", "w", encoding="utf-8") as f:
+                json.dump({
+                    "processed_count": processed_count,
+                    "retained_count": retained_count,
+                    "discarded_count": discarded_count,
+                }, f, ensure_ascii=False, indent=2)
+            logger.debug(f"Checkpoint saved: {processed_count} processed")
+        except Exception as e:
+            logger.warning(f"Checkpoint save failed: {e}")
+        finally:
+            self._checkpoint_lock.release()
 
     def _save_results(
         self,

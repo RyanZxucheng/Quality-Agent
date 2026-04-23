@@ -183,8 +183,7 @@ class AppConfig:
     llm_max_tokens: int = 1500
 
     # 批处理配置
-    batch_size: int = 1          # 默认顺序处理，>1 时启用并行
-    max_workers: int = 3
+    batch_size: int = 1          # 每批处理的数据条数（并发度）;=1 顺序处理，>1 时并行
     max_retained: Optional[int] = None
 
     @property
