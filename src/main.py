@@ -8,23 +8,9 @@ from pathlib import Path
 
 from src.processor import BatchProcessor
 from src.config import AppConfig, set_config
+from src.utils.logging_setup import setup_console_logging, print_header, print_summary_panel
 
 logger = logging.getLogger(__name__)
-
-
-def _setup_logging(output_dir: str):
-    """设置日志，输出到控制台和文件"""
-    log_dir = Path(output_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_dir / "medical_qa_agent.log", encoding="utf-8")
-        ]
-    )
 
 
 def main():
@@ -114,11 +100,17 @@ def main():
         default=1500,
         help="LLM 最大生成 token 数（默认: 1500）"
     )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        default=False,
+        help="启用详细/调试输出（默认: info-only）"
+    )
 
     args = parser.parse_args()
 
     # 设置日志（确保输出目录存在）
-    _setup_logging(args.output)
+    console = setup_console_logging(verbose=args.verbose, output_dir=args.output)
 
     # 验证输入文件
     for dataset_path in args.dataset:
@@ -142,18 +134,23 @@ def main():
     config.thresholds.accuracy_min = args.accuracy_threshold
     set_config(config)
 
-    logger.info("=" * 60)
-    logger.info("医学 QA 数据质量评估 Agent 启动")
-    logger.info("=" * 60)
-    logger.info(f"输入文件: {', '.join(args.dataset)}")
-    logger.info(f"输出目录: {args.output}")
-    logger.info(f"LLM: {config.llm_provider.value}/{config.llm_model}")
-    logger.info(f"温度: {config.llm_temperature}, 最大token: {config.llm_max_tokens}")
-    logger.info(f"总分阈值: {args.total_threshold}")
-    logger.info(f"准确性阈值: {args.accuracy_threshold}")
+    # ── 启动横幅 ──────────────────────────────────────────────────────────────
+    subtitle_lines = [
+        f"输入文件: {', '.join(args.dataset)}",
+        f"输出目录: {args.output}",
+        f"LLM: {config.llm_provider.value}/{config.llm_model}",
+        f"温度: {config.llm_temperature}, 最大token: {config.llm_max_tokens}",
+        f"总分阈值: {args.total_threshold}",
+        f"准确性阈值: {args.accuracy_threshold}",
+    ]
     if args.max_retained is not None:
-        logger.info(f"最大保留数: {args.max_retained}")
-    logger.info(f"批次大小: {args.batch_size} ({'并行' if args.batch_size > 1 else '顺序'})")
+        subtitle_lines.append(f"最大保留数: {args.max_retained}")
+    subtitle_lines.append(f"批次大小: {args.batch_size} ({'并行' if args.batch_size > 1 else '顺序'})")
+
+    print_header(
+        "医学 QA 数据质量评估 Agent",
+        "\n".join(subtitle_lines),
+    )
 
     # 处理
     try:
@@ -165,14 +162,15 @@ def main():
             max_retained=args.max_retained
         )
 
-        logger.info("=" * 60)
-        logger.info("处理完成")
-        logger.info("=" * 60)
-        logger.info(f"总处理: {summary.total_processed}")
-        logger.info(f"保留: {summary.retained}")
-        logger.info(f"丢弃: {summary.discarded}")
-        logger.info(f"保留率: {summary.retention_rate:.1%}")
-        logger.info(f"平均分: {summary.average_score:.1f}")
+        # ── 结束摘要面板 ──────────────────────────────────────────────────
+        print_summary_panel(
+            total=summary.total_processed,
+            retained=summary.retained,
+            discarded=summary.discarded,
+            retention_rate=summary.retention_rate,
+            average_score=summary.average_score,
+            dimension_averages=summary.dimension_averages,
+        )
 
     except Exception as e:
         logger.error(f"处理失败: {e}", exc_info=True)

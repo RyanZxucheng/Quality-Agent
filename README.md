@@ -296,9 +296,9 @@ python -m src.main --help
 ```text
 data/output/
 ├── cleaned_data/
-│   └── retained_qa.jsonl
+│   └── retained_qa.json
 ├── rejected/
-│   └── discarded_qa.jsonl
+│   └── discarded_qa.json
 ├── reports/
 │   ├── evaluation_report.json
 │   └── summary.txt

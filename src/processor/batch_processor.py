@@ -9,7 +9,14 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
-from tqdm import tqdm
+
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TimeElapsedColumn,
+)
 
 from src.models import QAPair, EvaluationResult, EvaluationSummary, Conclusion, EvidencePackage
 from src.evidence import EvidenceCollector
@@ -17,8 +24,22 @@ from src.scoring.llm_engine import LLMScoringEngine
 from src.decision import DecisionEngine
 from src.config import get_config
 from src.utils.file_utils import safe_read_json, safe_read_jsonl, safe_read_csv, ensure_dir
+from src.utils.logging_setup import get_console
 
 logger = logging.getLogger(__name__)
+
+
+def _make_progress(console):
+    """创建统一风格的 Progress 实例"""
+    return Progress(
+        SpinnerColumn(spinner_name="dots"),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    )
 
 
 class BatchProcessor:
@@ -65,17 +86,17 @@ class BatchProcessor:
 
         # 加载 QA 对（支持多文件）
         qa_pairs = self._load_qa_pairs(input_paths)
-        logger.info(f"Loaded {len(qa_pairs)} QA pairs from {len(input_paths)} file(s)")
+        logger.info(f"已加载 {len(qa_pairs)} 条 QA 数据，来自 {len(input_paths)} 个文件")
 
         # 根据配置选择处理模式
         if self.config.is_parallel:
-            logger.info(f"Parallel mode: batch_size={self.config.batch_size}")
+            logger.info(f"并行模式: batch_size={self.config.batch_size}")
             self.evidence_collector.warm_up()
             return self._process_parallel(
                 qa_pairs, output_dir, checkpoint_interval, max_retained
             )
         else:
-            logger.info("Sequential mode: batch_size=1")
+            logger.info("顺序模式: batch_size=1")
             return self._process_sequential(
                 qa_pairs, output_dir, checkpoint_interval, max_retained
             )
@@ -97,7 +118,7 @@ class BatchProcessor:
             output = self._format_output(qa_pair, evidence, evaluation)
             return qa_pair, evaluation, output
         except Exception as e:
-            logger.error(f"Failed to process {qa_pair.id}: {e}")
+            logger.error(f"处理失败 {qa_pair.id}: {e}")
             evaluation = self._create_error_result(qa_pair, str(e))
             return qa_pair, evaluation, None
 
@@ -112,23 +133,29 @@ class BatchProcessor:
         results: List[EvaluationResult] = []
         retained_data: List[Dict[str, Any]] = []
         discarded_data: List[Dict[str, Any]] = []
+        console = get_console()
 
-        for i, qa_pair in enumerate(tqdm(qa_pairs, desc="Processing")):
-            _, evaluation, output = self._process_single(qa_pair)
-            results.append(evaluation)
+        with _make_progress(console) as progress:
+            task = progress.add_task("处理中", total=len(qa_pairs))
 
-            if output is not None:
-                if evaluation.conclusion == Conclusion.RETAIN:
-                    retained_data.append(output)
-                else:
-                    discarded_data.append(output)
+            for i, qa_pair in enumerate(qa_pairs):
+                _, evaluation, output = self._process_single(qa_pair)
+                results.append(evaluation)
 
-            if max_retained is not None and len(retained_data) >= max_retained:
-                logger.info(f"Reached max retained limit ({max_retained}), stopping early.")
-                break
+                if output is not None:
+                    if evaluation.conclusion == Conclusion.RETAIN:
+                        retained_data.append(output)
+                    else:
+                        discarded_data.append(output)
 
-            if (i + 1) % checkpoint_interval == 0:
-                self._save_checkpoint(output_dir, results, retained_data, discarded_data)
+                if max_retained is not None and len(retained_data) >= max_retained:
+                    logger.info(f"达到最大保留数限制 ({max_retained})，提前停止")
+                    break
+
+                if (i + 1) % checkpoint_interval == 0:
+                    self._save_checkpoint(output_dir, results, retained_data, discarded_data)
+
+                progress.update(task, advance=1)
 
         return self._save_results(output_dir, results, retained_data, discarded_data)
 
@@ -154,7 +181,11 @@ class BatchProcessor:
         total = len(qa_pairs)
         stopped = False
 
-        pbar = tqdm(total=total, desc="Processing")
+        console = get_console()
+        progress = _make_progress(console)
+        progress.start()
+        task = progress.add_task("处理中", total=total)
+
         qa_iter = iter(enumerate(qa_pairs))
         pending_futures: Dict[Any, int] = {}
 
@@ -187,7 +218,7 @@ class BatchProcessor:
                         qa_pair, evaluation, output = future.result()
                     except Exception as e:
                         qa_pair = qa_pairs[idx]
-                        logger.error(f"Future failed for {qa_pair.id}: {e}")
+                        logger.error(f"Future 失败 {qa_pair.id}: {e}")
                         evaluation = self._create_error_result(qa_pair, str(e))
                         output = None
 
@@ -198,7 +229,7 @@ class BatchProcessor:
                         else:
                             discarded_data.append(output)
 
-                    pbar.update(1)
+                    progress.update(task, advance=1)
 
                     # 检查点
                     if len(results) % checkpoint_interval == 0:
@@ -206,7 +237,7 @@ class BatchProcessor:
 
                     # 早停判断
                     if max_retained is not None and len(retained_data) >= max_retained:
-                        logger.info(f"Reached max retained limit ({max_retained}), stopping early.")
+                        logger.info(f"达到最大保留数限制 ({max_retained})，提前停止")
                         stopped = True
                         # 取消尚未开始的任务
                         for f in list(pending_futures.keys()):
@@ -218,7 +249,7 @@ class BatchProcessor:
                     # 补充新任务，维持并发度
                     _submit_next()
         finally:
-            pbar.close()
+            progress.stop()
 
         return self._save_results(output_dir, results, retained_data, discarded_data)
 
@@ -237,19 +268,19 @@ class BatchProcessor:
                 elif suffix == ".jsonl":
                     items = safe_read_jsonl(input_path)
                 else:
-                    raise ValueError(f"Unsupported file format: {suffix}")
+                    raise ValueError(f"不支持的文件格式: {suffix}")
             except FileNotFoundError:
-                raise FileNotFoundError(f"Input file not found: {input_path}")
+                raise FileNotFoundError(f"输入文件不存在: {input_path}")
 
             all_items.extend(items)
-            logger.info(f"Loaded {len(items)} items from {input_path}")
+            logger.info(f"已加载 {len(items)} 条数据从 {input_path}")
 
         qa_pairs = []
         for i, item in enumerate(all_items):
             try:
                 qa_pairs.append(self._create_qa_pair(item, i))
             except ValueError as e:
-                logger.warning(f"Skip invalid QA item at index {i}: {e}")
+                logger.warning(f"跳过无效 QA 条目（索引 {i}）: {e}")
 
         return qa_pairs
 
@@ -326,7 +357,7 @@ class BatchProcessor:
     ):
         """检查点同步写入（在后台线程中执行）"""
         if not self._checkpoint_lock.acquire(blocking=False):
-            logger.debug("Checkpoint write already in progress, skipping")
+            logger.debug("检查点写入已在进行，跳过")
             return
         try:
             checkpoint_dir = Path(output_dir) / "checkpoint"
@@ -337,9 +368,9 @@ class BatchProcessor:
                     "retained_count": retained_count,
                     "discarded_count": discarded_count,
                 }, f, ensure_ascii=False, indent=2)
-            logger.debug(f"Checkpoint saved: {processed_count} processed")
+            logger.debug(f"检查点已保存: {processed_count} 条已处理")
         except Exception as e:
-            logger.warning(f"Checkpoint save failed: {e}")
+            logger.warning(f"检查点保存失败: {e}")
         finally:
             self._checkpoint_lock.release()
 
@@ -386,10 +417,9 @@ class BatchProcessor:
             }, f, ensure_ascii=False, indent=2)
 
         logger.info(
-            f"Results saved: {summary.retained} retained, "
-            f"{summary.discarded} discarded "
-            f"({summary.retention_rate:.1%} retention rate)"
+            f"结果已保存: 保留 {summary.retained} 条, "
+            f"丢弃 {summary.discarded} 条 "
+            f"(保留率 {summary.retention_rate:.1%})"
         )
 
         return summary
-
