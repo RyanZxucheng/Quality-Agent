@@ -4,7 +4,7 @@
 enabled: true
 
 # 作为 prompt 中“可直接评审”的参考置信度阈值（0-1）
-min_confidence: 0.7
+min_confidence: 0.8
 
 # 强制最少执行内部检索的轮次（0 = 不强制，完全由 LLM 自检决定）
 min_rounds: 0

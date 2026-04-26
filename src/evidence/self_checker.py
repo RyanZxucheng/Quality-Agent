@@ -13,7 +13,7 @@ from src.utils.json_utils import parse_llm_json
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SYSTEM_PROMPT = “””You are a medical QA quality self-check expert. Your task is to determine whether the currently available evidence is sufficient to make an accurate quality judgment on this medical QA pair — i.e., whether the QA's medical content is correct, complete, and professional — and to identify any key information gaps if needed.
+_DEFAULT_SYSTEM_PROMPT = """You are a medical QA quality self-check expert. Your task is to determine whether the currently available evidence is sufficient to make an accurate quality judgment on this medical QA pair — i.e., whether the QA's medical content is correct, complete, and professional — and to identify any key information gaps if needed.
 
 [Core Workflow]
 Base tool evidence → Round 0 self-check → If necessary, parallel search (internal KB + external sources) → Final scoring
@@ -51,7 +51,7 @@ Strictly output JSON with the following fields:
   “missing_slots”: “a description of the single most critical piece of information needed, e.g. 'need to confirm whether osimertinib is still the current standard first-line recommendation for EGFR-mutant NSCLC'. Empty string if no information is missing.”,
   “next_action”: “PROCEED or SEARCH”,
   “reasoning”: “brief reason within 50 words”
-}”””
+}"""
 
 
 class SelfChecker:

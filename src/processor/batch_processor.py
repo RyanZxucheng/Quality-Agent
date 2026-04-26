@@ -18,7 +18,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from rich.live import Live
-from rich.group import Group
+from rich.console import Group
 from rich.text import Text
 
 from src.models import (
@@ -221,7 +221,6 @@ class BatchProcessor:
             refresh_per_second=4,
             vertical_overflow="visible",
         ) as live:
-            progress.start()
             for i, qa_pair in enumerate(qa_pairs):
                 # Update progress bar description
                 progress.update(task, description=f"[cyan]{qa_pair.id}[/]")
@@ -255,8 +254,6 @@ class BatchProcessor:
                 group_elements.append(Text())  # spacing
                 group_elements.extend(result_lines)
                 live.update(Group(*group_elements))
-
-            progress.stop()
 
         return self._save_results(output_dir, results, retained_data, discarded_data)
 
@@ -332,56 +329,50 @@ class BatchProcessor:
             refresh_per_second=4,
             vertical_overflow="visible",
         ) as live:
-            progress.start()
+            with ThreadPoolExecutor(max_workers=batch_size) as executor:
+                # Submit initial batch
+                for _ in range(batch_size):
+                    if not _submit_next():
+                        break
 
-            try:
-                with ThreadPoolExecutor(max_workers=batch_size) as executor:
-                    # Submit initial batch
-                    for _ in range(batch_size):
-                        if not _submit_next():
-                            break
+                while pending_futures:
+                    future = next(as_completed(pending_futures))
+                    idx = pending_futures.pop(future)
 
-                    while pending_futures:
-                        future = next(as_completed(pending_futures))
-                        idx = pending_futures.pop(future)
+                    try:
+                        qa_pair, evaluation, output = future.result()
+                    except Exception as e:
+                        qa_pair = qa_pairs[idx]
+                        logger.error(f"Future failed {qa_pair.id}: {e}")
+                        evaluation = self._create_error_result(qa_pair, str(e))
+                        output = None
+                        error_line = _format_error_line(qa_pair, str(e))
+                        result_lines.append(error_line)
+                        if len(result_lines) > _MAX_RESULT_LINES:
+                            result_lines.pop(0)
 
-                        try:
-                            qa_pair, evaluation, output = future.result()
-                        except Exception as e:
-                            qa_pair = qa_pairs[idx]
-                            logger.error(f"Future failed {qa_pair.id}: {e}")
-                            evaluation = self._create_error_result(qa_pair, str(e))
-                            output = None
-                            error_line = _format_error_line(qa_pair, str(e))
-                            result_lines.append(error_line)
-                            if len(result_lines) > _MAX_RESULT_LINES:
-                                result_lines.pop(0)
+                    _on_result(qa_pair, evaluation, output)
+                    progress.update(task, advance=1)
 
-                        _on_result(qa_pair, evaluation, output)
-                        progress.update(task, advance=1)
+                    # Checkpoint
+                    if len(results) % checkpoint_interval == 0:
+                        self._save_checkpoint(output_dir, results, retained_data, discarded_data)
 
-                        # Checkpoint
-                        if len(results) % checkpoint_interval == 0:
-                            self._save_checkpoint(output_dir, results, retained_data, discarded_data)
+                    # Early stop
+                    if max_retained is not None and len(retained_data) >= max_retained:
+                        logger.info(f"Reached max retained limit ({max_retained}), stopping early")
+                        stopped = True
+                        for f in list(pending_futures.keys()):
+                            if not f.done():
+                                f.cancel()
+                        pending_futures.clear()
+                        break
 
-                        # Early stop
-                        if max_retained is not None and len(retained_data) >= max_retained:
-                            logger.info(f"Reached max retained limit ({max_retained}), stopping early")
-                            stopped = True
-                            for f in list(pending_futures.keys()):
-                                if not f.done():
-                                    f.cancel()
-                            pending_futures.clear()
-                            break
+                    # Replenish
+                    _submit_next()
 
-                        # Replenish
-                        _submit_next()
-
-                        # Update display
-                        live.update(_build_group())
-
-            finally:
-                progress.stop()
+                    # Update display
+                    live.update(_build_group())
 
         return self._save_results(output_dir, results, retained_data, discarded_data)
 

@@ -94,7 +94,7 @@ class InternalSearchExecutor:
 
         chunks_file = Path(self.config.index_dir) / "chunks.jsonl"
         if not chunks_file.exists():
-                logger.debug("Internal search index not available. Skipping internal retrieval.")
+            logger.debug("Internal search index not available. Skipping internal retrieval.")
             self._chunks = []
             return False
 

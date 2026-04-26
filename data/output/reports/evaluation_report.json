@@ -4,163 +4,88 @@
     "retained": 2,
     "discarded": 2,
     "retention_rate": "50.0%",
-    "average_score": 53.75,
+    "average_score": 51.0,
     "dimension_averages": {
-      "completeness": 17.0,
-      "accuracy": 23.75,
-      "professionalism": 13.0
+      "completeness": 16.5,
+      "accuracy": 21.75,
+      "professionalism": 12.75
     }
   },
   "detailed_results": [
     {
-      "id": "qa_001",
-      "question": "2型糖尿病患者可以服用二甲双胍吗？",
-      "answer": "可以。二甲双胍是2型糖尿病的一线治疗药物，主要通过抑制肝糖原输出和改善外周胰岛素敏感性来降低血糖。常见不良反应包括胃肠道反应。建议在医生指导下使用，并定期监测肾功能。",
-      "evidence": {
-        "rounds_executed": 1,
-        "evidence_insufficient": false,
-        "self_check_rounds": [
-          {
-            "confidence": 0.92,
-            "next_action": "PROCEED",
-            "blocking_issues": [],
-            "missing_slots": "",
-            "reasoning": "二甲双胍作为一线用药及注意事项属基础医学常识，无需检索即可判断质量。"
-          }
-        ],
-        "internal": null,
-        "external": []
-      },
-      "scores": {
-        "total": 85,
-        "dimensions": {
-          "completeness": 25,
-          "accuracy": 40,
-          "professionalism": 20
-        }
-      },
-      "issues": [],
-      "conclusion": "RETAIN",
-      "reason": "质量优秀（总分 85）; 医学准确性良好"
-    },
-    {
-      "id": "qa_002",
+      "id": "qa_1",
       "question": "感冒了应该吃什么药？",
       "answer": "吃点头孢就好了，多吃几天。",
+      "self_check_rounds": [
+        {
+          "confidence": 0.95,
+          "next_action": "PROCEED",
+          "blocking_issues": [],
+          "missing_slots": "",
+          "reasoning": "感冒多为病毒性，头孢为抗生素，滥用且无指征，回答明显错误"
+        }
+      ],
       "evidence": {
-        "rounds_executed": 1,
-        "evidence_insufficient": false,
-        "self_check_rounds": [
-          {
-            "confidence": 0.95,
-            "next_action": "PROCEED",
-            "blocking_issues": [],
-            "missing_slots": "",
-            "reasoning": "回答明显违背感冒诊疗原则，可直接判定为错误，无需检索。"
-          }
-        ],
         "internal": null,
         "external": []
       },
       "scores": {
-        "total": 20,
+        "total": 5,
         "dimensions": {
-          "completeness": 10,
-          "accuracy": 5,
-          "professionalism": 5
+          "completeness": 5,
+          "accuracy": 0,
+          "professionalism": 0
         }
       },
       "issues": [],
       "conclusion": "DISCARD",
-      "reason": "总分 20 低于阈值 70"
+      "reason": "Total score 5 below threshold 70"
     },
     {
-      "id": "qa_003",
-      "question": "高血压患者的日常注意事项有哪些？",
-      "answer": "高血压患者应注意：1）低盐饮食，每日钠盐摄入不超过6克；2）规律运动，每周至少150分钟中等强度有氧运动；3）戒烟限酒；4）控制体重，BMI保持在18.5-23.9；5）定期监测血压；6）遵医嘱服药，不可擅自停药。如有不适，请及时就医。",
+      "id": "qa_0",
+      "question": "2型糖尿病患者可以服用二甲双胍吗？",
+      "answer": "可以。二甲双胍是2型糖尿病的一线治疗药物，主要通过抑制肝糖原输出和改善外周胰岛素敏感性来降低血糖。常见不良反应包括胃肠道反应。建议在医生指导下使用，并定期监测肾功能。",
+      "self_check_rounds": [
+        {
+          "confidence": 0.95,
+          "next_action": "PROCEED",
+          "blocking_issues": [],
+          "missing_slots": "",
+          "reasoning": "二甲双胍为2型糖尿病一线用药属基础医学常识，回答准确无误，无需检索。"
+        }
+      ],
       "evidence": {
-        "rounds_executed": 1,
-        "evidence_insufficient": false,
-        "self_check_rounds": [
-          {
-            "confidence": 0.92,
-            "next_action": "PROCEED",
-            "blocking_issues": [],
-            "missing_slots": "",
-            "reasoning": "高血压基础防治原则明确，数据符合指南，无需检索即可判断质量。"
-          }
-        ],
         "internal": null,
         "external": []
       },
       "scores": {
-        "total": 90,
+        "total": 93,
         "dimensions": {
           "completeness": 28,
-          "accuracy": 40,
-          "professionalism": 22
+          "accuracy": 42,
+          "professionalism": 23
         }
       },
       "issues": [],
       "conclusion": "RETAIN",
-      "reason": "质量优秀（总分 90）; 医学准确性良好"
+      "reason": "Quality excellent (total 93); Medical accuracy satisfactory"
     },
     {
-      "id": "qa_004",
+      "id": "qa_3",
       "question": "偏头痛怎么治疗？",
       "answer": "头痛就睡睡吧，挺严重的就去医院看看。",
+      "self_check_rounds": [
+        {
+          "confidence": 0.95,
+          "next_action": "PROCEED",
+          "blocking_issues": [],
+          "missing_slots": "",
+          "reasoning": "回答极度敷衍且缺乏医学专业性，未提供标准治疗原则，明显不合格"
+        }
+      ],
       "evidence": {
-        "rounds_executed": 1,
-        "evidence_insufficient": false,
-        "self_check_rounds": [
-          {
-            "confidence": 0.35,
-            "next_action": "SEARCH",
-            "blocking_issues": [
-              "回答过于笼统，缺乏针对偏头痛的具体治疗原则、药物分级或急性/预防性治疗建议，无法判断其专业性和完整性。"
-            ],
-            "missing_slots": "偏头痛的急性发作和预防性治疗指南及常用药物推荐",
-            "reasoning": "回答过于简单，无法判断是否遗漏关键治疗原则，需检索指南核实。"
-          }
-        ],
         "internal": null,
-        "external": [
-          {
-            "tool": "exa_mcp",
-            "source": "[PDF] 中国偏头痛急性期治疗指南（第一版）",
-            "url": "https://bookcafe.yuntsg.com/ueditor/jsp/upload/file/20241119/1732009508017000555.pdf",
-            "snippet": "头痛急性期治疗指南（第一版）\n͙఩ࡧጴࡻц⺊㏻ڱ⻽ࡧጴܲц\u0001\u0001\n͙఩ⵀ⾢ಷࡧ䮎႒ц๠⬇̺ᙋ㻵䯈ⶹ̿͆ༀ঄ц\n摘 要 近年来，偏头痛的治疗策略不断规范更新，然而国内在偏头痛急性期治疗实践中仍面临一系   ...    特征表现为中至重度头痛，常伴有恶心、呕吐、畏\n光、畏声等症状 [1]，严重影响病人的工作与生活。\n目前的治疗方法包括急性期治疗和预防治疗。急性\n期治疗旨在迅速且持续地缓解疼痛及偏头痛相关伴\n随症状，改善病人的生活质量。然而，在偏头痛急   ...    为进一步指导和规范我国医师对偏头痛的急性\n期治疗，本指南在《中国偏头痛诊治指南（2022 版）》\n的基础上编写制订，涵盖的临床问题包括急性期治\n疗原则、药物治疗、非药物治疗、偏头痛持续状态\n治疗及特殊人群治疗。由于偏头痛的流行病学、临   ...    荐意见的影响、相关药物上市状态，以及指南相关推\n荐意见的强度是否改变等问题，并结合临床诊疗现状\n完成更新，以更好地指导临床实践并形成技术规范。\n二、治疗目的\n偏头痛急性期治疗的目的是快速且持续地解除 头痛及相关伴随症状，恢复生活、职业、学习及社\n会能力，减少不良事件的发生、经",
-            "query_used": "偏头痛的急性发作和预防性治疗指南及常用药物推荐"
-          },
-          {
-            "tool": "exa_mcp",
-            "source": "偏头痛急性期如何治疗？不同人群如何选择最佳方案？| 指南共识_腾讯新闻",
-            "url": "https://news.qq.com/rain/a/20250502A031TR00",
-            "snippet": "头痛是一种由神经-血管功能失调导致的高度失能的发作性疾病，其特征表现为中至重度头痛，常伴有恶心、呕吐、畏光、畏声等症状 ，严重影响病人的工作与生活。中国医师协会神经内科医师分会、中国研究型医院学会头痛与感觉障碍专业委员会共同发起制订《中国偏头痛急性期治疗指南（第一版）》，旨在进一步提升偏头痛急性期治疗效率。 偏头痛急性期的治疗目的\n偏头痛急性期治疗的目的是快速且持续地解除头痛及相关伴随症状，恢复生活、职业、学习及社会能力，减少不良事件的发生、经济及医疗资源消耗。如果头痛发作频率较高，需结合预防治疗。\n疗效评判标准 常用治疗有效性的评价标准包括：\n①2小时内无疼痛；\n②2小时内最困扰病人的伴随症状（MBS，即恶心、呕吐、畏光或畏声）消失；\n③2小时后疼痛缓解，即由中重度疼痛转为轻度或无痛；\n④3次发作中至少2次有效； ⑤治疗2小时内头痛消失，且24小时或48小时内无头痛复发或未进一步服用镇痛药物。\n偏头痛急性期的药物治疗\n1.选药原则： 偏头痛急性期用药分为非特异性药物（如对乙酰氨基酚、非甾体抗炎药[NSAIDs]、含咖啡因的复方制剂）和特异性药物（如曲普坦类、吉泮类、地坦类、麦角胺类药",
-            "query_used": "偏头痛的急性发作和预防性治疗指南及常用药物推荐"
-          },
-          {
-            "tool": "exa_mcp",
-            "source": "2023最新指南：《中国偏头痛诊断与治疗指南（中华学会神经病学分会第一版）》|药物治疗|偏头痛|治疗|受体|-健康界",
-            "url": "https://www.cn-healthcare.com/articlewm/20230905/content-1601257.html",
-            "snippet": "隔电神经调控 ，推荐急性发作期治疗。   ...    治 疗\n患者教育\n良好的患者教育是偏头痛全程管理的基础。比如：教育患者记录头痛日记，提倡健康的生活方式，告知患者目前偏头痛无法根治，但可有效控制，帮助患者确立合理的治疗预期，正确合理使用急性期药物，及时启动预防性治疗。\n药物治疗 （一）急性发作期药物治疗\n非特异性药物治疗\n包括对乙酰氨基酚、布洛芬、阿司匹林、双氯芬酸、萘普生、对乙酰氨基酚与咖啡因复方制剂、吲哚美辛。\n特异性药物治疗\n①曲普坦类：利扎曲普坦、佐米曲普坦、舒马曲普坦 ②降钙素基因相关肽（CGRP）受体拮抗剂：rimegepant、ubrogepant\n③选择性5‑HT1F受体激动剂：lasmiditan\n其他药物治疗 （1）当偏头痛患者出现发作相关的恶心呕吐症状时，推荐使用甲氧氯普胺，推荐剂量10~20mg/次，1日剂量不超过0.5mg/kg（口服、肌内注射或静脉注射）（Ⅰ级推荐，A级证据）。 （2）当偏头痛患者出现发作相关的恶心、呕吐症状时，推荐使用多潘立酮，推荐剂量10~30mg/d（Ⅰ级推荐，A级证据）。\n（二）预防性药物治疗\n发作性偏头痛（EM）\n①β受体阻滞",
-            "query_used": "偏头痛的急性发作和预防性治疗指南及常用药物推荐"
-          },
-          {
-            "tool": "exa_mcp",
-            "source": "门诊急性发作性偏头痛的药物治疗：ACP在《内科医学年鉴》发布临床指南_腾讯新闻",
-            "url": "https://news.qq.com/rain/a/20250320A08MNL00",
-            "snippet": "痛是一种常见且致残的疾病，据2019年全球疾病负担研究报告，偏头痛已成为全球第二大致残原因。近日，美国内科医师学会 (ACP) 临床指南委员会发布了一份关于在门诊治疗成人急性发作性偏头痛（指每月头痛天数为1-14天）的临床指南“Pharmacologic Treatments of Acute Episodic Migraine Headache in   ...    偏头痛的特征是反复发作的中度至重度头痛，通常持续4-72小时，可能伴有或不伴有先兆症状（感觉障碍），头痛通常呈搏动性，并常伴随恶心、呕吐、畏光或畏声。致残性发作会干扰日常生活并影响生活质量。偏头痛仍未得到充分诊断和治疗。成人偏头痛患者可选 择多种药物，包括非特异性非处方止痛药（如非甾体类抗炎药 [NSAID]）和偏头痛特异性药物（如曲坦类和二氢麦角胺）。较新、较昂贵的治疗药物（如降钙素基因相关肽拮抗剂 [CGRP拮抗剂-吉泮类] 和选择性5-羟色胺1F激动剂 [地坦类]）已成为潜在的替代疗法。美国内科医师学会（ACP）根据这些急性发作性偏头痛药物治疗的最佳现有证据、患者价值观和偏好，以及经济学证据，提出临床建议。以便对",
-            "query_used": "偏头痛的急性发作和预防性治疗指南及常用药物推荐"
-          },
-          {
-            "tool": "exa_mcp",
-            "source": "【诊疗攻略】偏头痛：分类及诊断+急性期药物治疗+预防性药物治疗_腾讯新闻",
-            "url": "https://news.qq.com/rain/a/20250307A0847I00",
-            "snippet": "主要讲述偏头痛的分类及诊断、治疗方法。其分类包括无先兆偏头痛、有先兆偏头痛、慢性偏头痛（chronic migraine，CM）、偏头痛并发症、很可能的偏头痛和可能与偏头痛相关的周期性综合征6个类型；治疗方法分为急性期药物治疗、预防性药物治疗。   ...    反复发作性头转向一侧，可有轻微转动，数分钟至数天后自行缓解，可伴面色苍白、易激惹、精神萎靡、呕吐等。\n治疗方法\n治疗分为急性期治疗和预防性治疗，通常需要急性期治疗和预防性治疗相结合。\n急性期药物治疗 急性发作期药物治疗的核心目标是快速持续止痛、恢复患者功能、减少不良事件的发生、减少经济及医疗资源消耗。偏头痛急性期用药分为非特异性药物（如对乙酰氨基酚、非甾体抗炎药、含咖啡因的复方制剂）、特异性药物（如曲普坦类、吉泮类、地坦类、麦角胺类药 物）、止吐药等[4]。 非特异性药物治疗\n解热镇痛药通过抑制环氧化酶，减少前列腺素合成而起到镇痛作用。常用药物有对乙酰氨基酚、NSAIDs（如布洛芬、双氯芬酸、萘普生以及阿司匹林等）、含咖啡因的复方制剂。（见表1） 表1：成人偏头痛急性期口服非特异性药物治疗推荐 对乙酰氨基酚对乙酰氨基酚可有效缓",
-            "query_used": "偏头痛的急性发作和预防性治疗指南及常用药物推荐"
-          }
-        ]
+        "external": []
       },
       "scores": {
         "total": 20,
@@ -172,11 +97,40 @@
       },
       "issues": [],
       "conclusion": "DISCARD",
-      "reason": "总分 20 低于阈值 70"
+      "reason": "Total score 20 below threshold 70"
+    },
+    {
+      "id": "qa_2",
+      "question": "高血压患者的日常注意事项有哪些？",
+      "answer": "高血压患者应注意：1）低盐饮食，每日钠盐摄入不超过6克；2）规律运动，每周至少150分钟中等强度有氧运动；3）戒烟限酒；4）控制体重，BMI保持在18.5-23.9；5）定期监测血压；6）遵医嘱服药，不可擅自停药。如有不适，请及时就医。",
+      "self_check_rounds": [
+        {
+          "confidence": 0.95,
+          "next_action": "PROCEED",
+          "blocking_issues": [],
+          "missing_slots": "",
+          "reasoning": "回答涵盖高血压生活方式干预的核心要点，符合主流指南共识，内容准确完整。"
+        }
+      ],
+      "evidence": {
+        "internal": null,
+        "external": []
+      },
+      "scores": {
+        "total": 86,
+        "dimensions": {
+          "completeness": 28,
+          "accuracy": 35,
+          "professionalism": 23
+        }
+      },
+      "issues": [],
+      "conclusion": "RETAIN",
+      "reason": "Quality excellent (total 86); Medical accuracy satisfactory"
     }
   ],
   "metadata": {
-    "generated_at": "2026-04-14T22:03:34.427810",
+    "generated_at": "2026-04-26T16:38:25.022486",
     "version": "1.0.0"
   }
 }

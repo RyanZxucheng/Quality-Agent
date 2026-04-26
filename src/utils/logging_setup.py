@@ -126,41 +126,51 @@ def print_header(
     left_parts = []
     right_parts = []
 
+    def _append_label_value(line: Text, label: str, value: str) -> None:
+        line.append(label, style="bold")
+        line.append(" ")
+        line.append(value)
+
     if input_files:
-        left_parts.append(f"[bold]Input:[/] {input_files}")
+        left_parts.append(("Input:", input_files))
     if model:
-        right_parts.append(f"[bold]Model:[/] {model}")
+        right_parts.append(("Model:", model))
 
     if left_parts or right_parts:
         line = Text()
         if left_parts:
-            line.append(left_parts[0])
-            line.append("  │  ")
+            _append_label_value(line, *left_parts[0])
+            if right_parts:
+                line.append("  │  ")
         if right_parts:
-            line.append(right_parts[0])
+            _append_label_value(line, *right_parts[0])
         info_lines.append(line)
 
     left_parts2 = []
     right_parts2 = []
     if output_dir:
-        left_parts2.append(f"[bold]Output:[/] {output_dir}")
+        left_parts2.append(("Output:", output_dir))
     if thresholds:
-        right_parts2.append(f"[bold]Thresholds:[/] {thresholds}")
+        right_parts2.append(("Thresholds:", thresholds))
     if batch_info:
-        right_parts2.append(f"[bold]Batch:[/] {batch_info}")
+        right_parts2.append(("Batch:", batch_info))
 
     if left_parts2 or right_parts2:
         line2 = Text()
         if left_parts2:
-            line2.append(left_parts2[0])
-            line2.append("  │  ")
+            _append_label_value(line2, *left_parts2[0])
+            if right_parts2:
+                line2.append("  │  ")
         if right_parts2:
-            line2.append("  │  ".join(right_parts2))
+            for i, part in enumerate(right_parts2):
+                if i > 0:
+                    line2.append("  │  ")
+                _append_label_value(line2, *part)
         info_lines.append(line2)
 
     if llm_info:
         line3 = Text()
-        line3.append(f"[dim]{llm_info}[/dim]")
+        line3.append(llm_info, style="dim")
         info_lines.append(line3)
 
     content = Text.assemble(
@@ -198,28 +208,28 @@ def print_summary_panel(
     """
     console = get_console()
 
-    status_icon = "[bold green]✓[/]" if retention_rate >= 0.5 else "[bold yellow]⚠[/]"
+    status_color = "green" if retention_rate >= 0.5 else "yellow"
 
-    summary = Text.assemble(
-        (f"  {status_icon} ", ""),
-        (f"[bold]Retained:[/] {retained}/{total} ({retention_rate:.1%})", "green" if retention_rate >= 0.5 else "yellow"),
-        "  │  ",
-        (f"[bold]Avg Score:[/] {average_score:.1f}", "white"),
-    )
+    summary = Text("  ")
+    summary.append("✓" if retention_rate >= 0.5 else "⚠", style=f"bold {status_color}")
+    summary.append(" ")
+    summary.append("Retained:", style="bold")
+    summary.append(f" {retained}/{total} ({retention_rate:.1%})", style=status_color)
+    summary.append("  │  ")
+    summary.append("Avg Score:", style="bold")
+    summary.append(f" {average_score:.1f}", style="white")
 
     lines = [summary]
 
     if dimension_averages:
         dim_text = Text("  ")
-        dim_parts = []
-        for name, avg in dimension_averages.items():
+        for i, (name, avg) in enumerate(dimension_averages.items()):
             color = "green" if avg >= 30 else "yellow" if avg >= 20 else "red"
-            dim_parts.append(f"[{color}]{name}: {avg:.1f}[/{color}]")
-        dim_text.append("  │  ".join(dim_parts))
+            if i > 0:
+                dim_text.append("  │  ")
+            dim_text.append(f"{name}: {avg:.1f}", style=color)
         lines.append(Text())
         lines.append(dim_text)
-
-    content = Text("\n".join(str(t) for t in lines) if False else Text())
 
     # Rebuild properly
     content2 = Text()
