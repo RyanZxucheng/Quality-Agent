@@ -13,45 +13,45 @@ from src.utils.json_utils import parse_llm_json
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SYSTEM_PROMPT = """你是医学 QA 质量自检专家。你的任务是判断当前已有证据是否足以对这条医学问答数据做出准确的质量判断，也就是判断这条 QA 的医学内容是否正确、完整、专业，并在必要时指出仍需补充的关键信息。
+_DEFAULT_SYSTEM_PROMPT = “””You are a medical QA quality self-check expert. Your task is to determine whether the currently available evidence is sufficient to make an accurate quality judgment on this medical QA pair — i.e., whether the QA's medical content is correct, complete, and professional — and to identify any key information gaps if needed.
 
-【核心流程】
-基础工具证据 → Round 0 自检判断 → 若有必要则并行检索（内部知识库 + 外部来源）→ 最终评分
+[Core Workflow]
+Base tool evidence → Round 0 self-check → If necessary, parallel search (internal KB + external sources) → Final scoring
 
-【你的判断目标】
-你要回答的不是“我是否掌握了这道题所有最新最全的医学知识”，而是：
-“基于当前证据和我的已有知识，我是否已经足以判断这条 QA 的质量好坏？”
+[Your Judgment Goal]
+The question is NOT “do I have all the latest medical knowledge about this topic?” Rather:
+“Based on current evidence and my existing knowledge, am I already able to judge the quality of this QA?”
 
-换句话说：
-- 如果你已经能判断回答大方向正确或错误，即使仍有少量细节拿不准，也可以 PROCEED
-- 只有当这些缺失信息会直接影响你对 QA 正误、完整性或专业性的判断时，才应该 SEARCH
+In other words:
+- If you can already tell whether the answer is broadly correct or incorrect, you may PROCEED even if minor details remain uncertain
+- You should only SEARCH when missing information would directly affect your judgment of the QA's correctness, completeness, or professionalism
 
-【何时选择 PROCEED】
-- 这是基础医学常识、常见药理、不良反应、禁忌、常规鉴别、基础诊疗原则
-- 你已经能够明确判断答案的大方向正确、错误、过时或不完整
-- 即使缺少少量细节，也不会改变你对这条 QA 质量的最终判断
+[When to Choose PROCEED]
+- This involves basic medical knowledge, common pharmacology, adverse reactions, contraindications, routine differential diagnosis, or fundamental treatment principles
+- You can clearly determine the answer is broadly correct, incorrect, outdated, or incomplete
+- Even if minor details are missing, they would not change your final quality judgment on this QA
 
-【何时选择 SEARCH】
-- 是否正确明显依赖最新指南、共识、循证更新或版本时效性
-- 是否正确取决于特定适应症、人群分层、分期、分型、突变状态、剂量条件或治疗线别
-- 你无法确认回答提到的治疗方案、推荐地位、适用条件或禁忌边界
-- 你目前无法判断回答究竟是“正确”“部分正确但不完整”还是“错误”
+[When to Choose SEARCH]
+- Correctness clearly depends on the latest guidelines, consensus, evidence-based updates, or version timeliness
+- Correctness depends on specific indications, population stratification, staging, typing, mutation status, dosage conditions, or treatment line
+- You cannot confirm the treatment plan, recommendation status, applicable conditions, or contraindication boundaries mentioned in the answer
+- You currently cannot determine whether the answer is “correct,” “partially correct but incomplete,” or “incorrect”
 
-【系统参考阈值】
-当前系统对“可以直接进入评审”的参考置信度阈值是 {min_confidence}。
-- 如果你的把握明显低于这个阈值，通常应选择 SEARCH
-- 如果你的把握达到或高于这个阈值，且不存在关键阻碍问题，通常可选择 PROCEED
-- 这是帮助你与系统决策保持一致的参考阈值，不是死板公式；最终仍应以“是否足以做质量判断”为核心标准
+[System Reference Threshold]
+The current system's reference confidence threshold for “can proceed to evaluation” is {min_confidence}.
+- If your confidence is significantly below this threshold, you should generally choose SEARCH
+- If your confidence meets or exceeds this threshold and no critical blocking issues exist, you may generally choose PROCEED
+- This is a reference threshold to help align with system decisions, not a rigid formula; the core standard remains “is the evidence sufficient for quality judgment”
 
-【输出格式】
-严格输出 JSON，包含以下字段：
+[Output Format]
+Strictly output JSON with the following fields:
 {
-  "confidence": 0到1之间的小数，表示你对当前能否做出准确质量判断的把握程度（不是对答案本身的把握，而是对"我能判断这条数据质量"的把握），
-  "blocking_issues": ["阻碍你做出判断的具体问题，若没有则为空列表"],
-  "missing_slots": "一段描述当前最需要补充的一个关键信息的文字，例如'需要确认奥希替尼是否仍属于EGFR突变NSCLC的当前标准一线推荐'。若不缺少任何信息则为空字符串",
-  "next_action": "PROCEED 或 SEARCH",
-  "reasoning": "不超过50字的简短理由"
-}"""
+  “confidence”: float between 0 and 1, indicating your confidence in making an accurate quality judgment (not confidence in the answer itself, but in “I can judge this data's quality”),
+  “blocking_issues”: [“specific issues blocking your judgment, empty list if none”],
+  “missing_slots”: “a description of the single most critical piece of information needed, e.g. 'need to confirm whether osimertinib is still the current standard first-line recommendation for EGFR-mutant NSCLC'. Empty string if no information is missing.”,
+  “next_action”: “PROCEED or SEARCH”,
+  “reasoning”: “brief reason within 50 words”
+}”””
 
 
 class SelfChecker:
@@ -134,7 +134,7 @@ class SelfChecker:
                 blocking_issues=[],
                 missing_slots="",
                 next_action=NextAction.PROCEED,
-                reasoning="自检已禁用",
+                reasoning="Self-check disabled",
             )
 
         user_prompt = self._build_user_prompt(question, answer)
@@ -147,23 +147,23 @@ class SelfChecker:
             logger.error(f"Self-check LLM call failed: {e}")
             return SelfCheckResult(
                 confidence=0.5,
-                blocking_issues=[f"自检调用失败: {e}"],
+                blocking_issues=[f"Self-check LLM call failed: {e}"],
                 missing_slots="",
                 next_action=NextAction.PROCEED,
-                reasoning="LLM 调用异常，保守地直接评分",
+                reasoning="LLM call exception, conservatively proceeding to scoring",
             )
 
     def _build_user_prompt(self, question: str, answer: str) -> str:
         lines = [
-            "【待评审 QA】",
-            f"问题：{question}",
-            f"回答：{answer}",
+            "[QA to Evaluate]",
+            f"Question: {question}",
+            f"Answer: {answer}",
             "",
-            "【可选动作】",
-            "- PROCEED：当前证据已足够，直接进行评分",
-            "- SEARCH：证据不足，系统将自动并行检索内部知识库与外部来源",
+            "[Available Actions]",
+            "- PROCEED: Current evidence is sufficient, proceed to scoring directly",
+            "- SEARCH: Insufficient evidence, system will automatically search internal KB and external sources",
             "",
-            "请判断上述证据是否足以完成质量评审，输出 JSON：",
+            "Please determine if the above evidence is sufficient for quality review. Output JSON:",
         ]
         return "\n".join(lines)
 
@@ -191,8 +191,8 @@ class SelfChecker:
             logger.error(f"Failed to parse self-check result: {e}\nRaw: {raw_text[:300]}")
             return SelfCheckResult(
                 confidence=0.5,
-                blocking_issues=["解析自检结果失败"],
+                blocking_issues=["Failed to parse self-check result"],
                 missing_slots="",
                 next_action=NextAction.PROCEED,
-                reasoning="解析异常，保守直接评分",
+                reasoning="Parse error, conservatively proceeding to scoring",
             )

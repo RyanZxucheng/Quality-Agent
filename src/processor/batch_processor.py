@@ -1,7 +1,7 @@
 """
-批量处理器
-处理 JSON/CSV/JSONL 文件，执行批量评估
-流程: 工具收集证据 -> LLM评分 -> 代码决策
+Batch processor
+Process JSON/CSV/JSONL files through the evaluation pipeline:
+Evidence Collection → LLM Scoring → Decision
 """
 import json
 import logging
@@ -17,8 +17,18 @@ from rich.progress import (
     BarColumn,
     TimeElapsedColumn,
 )
+from rich.live import Live
+from rich.group import Group
+from rich.text import Text
 
-from src.models import QAPair, EvaluationResult, EvaluationSummary, Conclusion, EvidencePackage
+from src.models import (
+    QAPair,
+    EvaluationResult,
+    EvaluationSummary,
+    Conclusion,
+    EvidencePackage,
+    NextAction,
+)
 from src.evidence import EvidenceCollector
 from src.scoring.llm_engine import LLMScoringEngine
 from src.decision import DecisionEngine
@@ -28,9 +38,12 @@ from src.utils.logging_setup import get_console
 
 logger = logging.getLogger(__name__)
 
+# Number of recent per-QA result lines to keep visible during processing
+_MAX_RESULT_LINES = 6
+
 
 def _make_progress(console):
-    """创建统一风格的 Progress 实例"""
+    """Create a consistently styled Progress instance"""
     return Progress(
         SpinnerColumn(spinner_name="dots"),
         TextColumn("[progress.description]{task.description}"),
@@ -38,15 +51,80 @@ def _make_progress(console):
         TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
         TimeElapsedColumn(),
         console=console,
-        transient=True,
     )
+
+
+def _format_result_line(
+    qa_pair: QAPair,
+    evaluation: EvaluationResult,
+    evidence: Any,
+) -> Text:
+    """
+    Format a single QA result line for live display.
+
+    Returns a rich Text with colorized summary, e.g.:
+      qa_0: self-check passed → score 82 → retained ✓
+    """
+    # Determine status icon and color
+    is_retained = evaluation.conclusion == Conclusion.RETAIN
+    icon = "✓" if is_retained else "✗"
+    color = "green" if is_retained else "red"
+
+    # Extract brief action description
+    action_text = ""
+    if evidence and isinstance(evidence, EvidencePackage):
+        if evidence.self_check_rounds:
+            round0 = evidence.self_check_rounds[0]
+            if round0.next_action == NextAction.PROCEED:
+                action_text = "self-check passed"
+            elif round0.next_action == NextAction.SEARCH:
+                num_internal = len(evidence.internal_context.chunks) if evidence.internal_context else 0
+                num_external = len(evidence.external_evidence)
+                if num_internal + num_external > 0:
+                    total_sources = num_internal + num_external
+                    action_text = f"searched {total_sources} source{'s' if total_sources > 1 else ''}"
+                elif evidence.evidence_insufficient:
+                    action_text = "evidence insufficient"
+                else:
+                    action_text = "self-check passed"
+            else:
+                action_text = round0.next_action.value.lower().replace("_", " ")
+
+    score = evaluation.scores.total_score if evaluation.scores else 0
+
+    # Build brief result label
+    if is_retained:
+        label = "retained"
+    else:
+        short_reason = ""
+        if evaluation.reason:
+            short_reason = evaluation.reason.split("(")[0].strip() if "(" in evaluation.reason else evaluation.reason
+        label = f"discarded ({short_reason})" if short_reason else "discarded"
+
+    line = Text()
+    line.append(f"  {qa_pair.id}: ", style="bold")
+    line.append(action_text, style="cyan")
+    line.append(f" → score {score} → ", style="white")
+    line.append(f"{label} ", style=f"bold {color}")
+    line.append(icon, style=color)
+    return line
+
+
+def _format_error_line(qa_pair: QAPair, error: str) -> Text:
+    """Format an error result line."""
+    line = Text()
+    line.append(f"  {qa_pair.id}: ", style="bold")
+    line.append(f"failed ({error})", style="red")
+    line.append(" → ", style="white")
+    line.append("discarded ✗", style="bold red")
+    return line
 
 
 class BatchProcessor:
     """
-    批量处理器
-    基于工具证据 + LLM 评分的质量评估流程
-    支持顺序处理和并行批次处理
+    Batch processor
+    Quality assessment pipeline using tool evidence + LLM scoring.
+    Supports sequential and parallel batch processing.
     """
 
     def __init__(
@@ -59,7 +137,7 @@ class BatchProcessor:
         self.evidence_collector = evidence_collector or EvidenceCollector()
         self.llm_scoring_engine = llm_scoring_engine or LLMScoringEngine()
         self.decision_engine = decision_engine or DecisionEngine()
-        # 检查点写入锁，防止后台线程重叠写入
+        # Checkpoint write lock to prevent overlapping writes from background threads
         self._checkpoint_lock = threading.Lock()
 
     def process_file(
@@ -70,43 +148,41 @@ class BatchProcessor:
         max_retained: Optional[int] = None
     ) -> EvaluationSummary:
         """
-        处理输入文件
+        Process input files through the evaluation pipeline.
 
         Args:
-            input_paths: 输入文件路径列表（JSON/CSV/JSONL）
-            output_dir: 输出目录
-            checkpoint_interval: 检查点保存间隔
-            max_retained: 最大保留数量，达到后提前停止
+            input_paths: input file paths (JSON/CSV/JSONL)
+            output_dir: output directory
+            checkpoint_interval: checkpoint save interval
+            max_retained: stop early after retaining this many items
 
         Returns:
-            EvaluationSummary: 评估摘要
+            EvaluationSummary
         """
         output_dir = output_dir or self.config.output_dir
         ensure_dir(output_dir)
 
-        # 加载 QA 对（支持多文件）
         qa_pairs = self._load_qa_pairs(input_paths)
-        logger.info(f"已加载 {len(qa_pairs)} 条 QA 数据，来自 {len(input_paths)} 个文件")
+        logger.info(f"Loaded {len(qa_pairs)} QA items from {len(input_paths)} file(s)")
 
-        # 根据配置选择处理模式
         if self.config.is_parallel:
-            logger.info(f"并行模式: batch_size={self.config.batch_size}")
+            logger.info(f"Parallel mode: batch_size={self.config.batch_size}")
             self.evidence_collector.warm_up()
             return self._process_parallel(
                 qa_pairs, output_dir, checkpoint_interval, max_retained
             )
         else:
-            logger.info("顺序模式: batch_size=1")
+            logger.info("Sequential mode: batch_size=1")
             return self._process_sequential(
                 qa_pairs, output_dir, checkpoint_interval, max_retained
             )
 
     def _process_single(self, qa_pair: QAPair) -> Tuple[QAPair, EvaluationResult, Optional[Dict[str, Any]]]:
         """
-        处理单个 QA 对
+        Process a single QA pair.
 
         Returns:
-            (qa_pair, evaluation, output_dict) — output_dict 为 None 表示错误
+            (qa_pair, evaluation, output_dict) — output_dict is None on error
         """
         try:
             evidence = self.evidence_collector.collect(qa_pair)
@@ -118,7 +194,7 @@ class BatchProcessor:
             output = self._format_output(qa_pair, evidence, evaluation)
             return qa_pair, evaluation, output
         except Exception as e:
-            logger.error(f"处理失败 {qa_pair.id}: {e}")
+            logger.error(f"Processing failed {qa_pair.id}: {e}")
             evaluation = self._create_error_result(qa_pair, str(e))
             return qa_pair, evaluation, None
 
@@ -129,16 +205,27 @@ class BatchProcessor:
         checkpoint_interval: int,
         max_retained: Optional[int],
     ) -> EvaluationSummary:
-        """顺序处理模式"""
+        """Sequential processing mode with live display."""
         results: List[EvaluationResult] = []
         retained_data: List[Dict[str, Any]] = []
         discarded_data: List[Dict[str, Any]] = []
+        result_lines: List[Text] = []
         console = get_console()
 
-        with _make_progress(console) as progress:
-            task = progress.add_task("处理中", total=len(qa_pairs))
+        progress = _make_progress(console)
+        task = progress.add_task("Processing...", total=len(qa_pairs))
 
+        with Live(
+            Group(progress, Text("\n".join("" for _ in range(_MAX_RESULT_LINES)))),
+            console=console,
+            refresh_per_second=4,
+            vertical_overflow="visible",
+        ) as live:
+            progress.start()
             for i, qa_pair in enumerate(qa_pairs):
+                # Update progress bar description
+                progress.update(task, description=f"[cyan]{qa_pair.id}[/]")
+
                 _, evaluation, output = self._process_single(qa_pair)
                 results.append(evaluation)
 
@@ -149,13 +236,27 @@ class BatchProcessor:
                         discarded_data.append(output)
 
                 if max_retained is not None and len(retained_data) >= max_retained:
-                    logger.info(f"达到最大保留数限制 ({max_retained})，提前停止")
+                    logger.info(f"Reached max retained limit ({max_retained}), stopping early")
                     break
 
                 if (i + 1) % checkpoint_interval == 0:
                     self._save_checkpoint(output_dir, results, retained_data, discarded_data)
 
+                # Build result line
+                line = _format_result_line(qa_pair, evaluation, evaluation.evidence)
+                result_lines.append(line)
+                if len(result_lines) > _MAX_RESULT_LINES:
+                    result_lines.pop(0)
+
                 progress.update(task, advance=1)
+
+                # Refresh the live display
+                group_elements = [progress]
+                group_elements.append(Text())  # spacing
+                group_elements.extend(result_lines)
+                live.update(Group(*group_elements))
+
+            progress.stop()
 
         return self._save_results(output_dir, results, retained_data, discarded_data)
 
@@ -166,16 +267,17 @@ class BatchProcessor:
         checkpoint_interval: int,
         max_retained: Optional[int],
     ) -> EvaluationSummary:
-        """并行处理模式——流式批次提交
+        """Parallel processing mode — streaming batch submission.
 
-        batch_size = 每批同时在处理的数据条数（并发度）。
-        始终保持最多 batch_size 个任务在运行：先提交第一批，
-        后续每完成一个就补充一个，无批次间等待，也避免一次性
-        提交全部任务造成的内存堆积。
+        batch_size = number of items concurrently in-flight.
+        Always keeps at most batch_size tasks running: submits the first batch,
+        then replenishes one-by-one as tasks complete.
         """
         results: List[EvaluationResult] = []
         retained_data: List[Dict[str, Any]] = []
         discarded_data: List[Dict[str, Any]] = []
+        result_lines: List[Text] = []
+        lock = threading.Lock()
 
         batch_size = self.config.batch_size
         total = len(qa_pairs)
@@ -183,14 +285,13 @@ class BatchProcessor:
 
         console = get_console()
         progress = _make_progress(console)
-        progress.start()
-        task = progress.add_task("处理中", total=total)
+        task = progress.add_task("Processing...", total=total)
 
         qa_iter = iter(enumerate(qa_pairs))
         pending_futures: Dict[Any, int] = {}
 
         def _submit_next() -> bool:
-            """提交下一个任务，返回是否成功提交"""
+            """Submit the next task, returns whether a task was submitted."""
             nonlocal stopped
             if stopped:
                 return False
@@ -202,59 +303,90 @@ class BatchProcessor:
             except StopIteration:
                 return False
 
-        try:
-            with ThreadPoolExecutor(max_workers=batch_size) as executor:
-                # 先提交第一批任务，填满并发槽位
-                for _ in range(batch_size):
-                    if not _submit_next():
-                        break
+        def _on_result(qa_pair, evaluation, output):
+            """Thread-safe result accumulation."""
+            with lock:
+                results.append(evaluation)
+                if output is not None:
+                    if evaluation.conclusion == Conclusion.RETAIN:
+                        retained_data.append(output)
+                    else:
+                        discarded_data.append(output)
 
-                while pending_futures:
-                    future = next(as_completed(pending_futures))
-                    idx = pending_futures.pop(future)
+                line = _format_result_line(qa_pair, evaluation, evaluation.evidence)
+                result_lines.append(line)
+                if len(result_lines) > _MAX_RESULT_LINES:
+                    result_lines.pop(0)
 
-                    # 取结果
-                    try:
-                        qa_pair, evaluation, output = future.result()
-                    except Exception as e:
-                        qa_pair = qa_pairs[idx]
-                        logger.error(f"Future 失败 {qa_pair.id}: {e}")
-                        evaluation = self._create_error_result(qa_pair, str(e))
-                        output = None
+        def _build_group():
+            with lock:
+                group_elements = [progress]
+                if result_lines:
+                    group_elements.append(Text())
+                    group_elements.extend(result_lines)
+                return Group(*group_elements)
 
-                    results.append(evaluation)
-                    if output is not None:
-                        if evaluation.conclusion == Conclusion.RETAIN:
-                            retained_data.append(output)
-                        else:
-                            discarded_data.append(output)
+        with Live(
+            Group(progress),
+            console=console,
+            refresh_per_second=4,
+            vertical_overflow="visible",
+        ) as live:
+            progress.start()
 
-                    progress.update(task, advance=1)
+            try:
+                with ThreadPoolExecutor(max_workers=batch_size) as executor:
+                    # Submit initial batch
+                    for _ in range(batch_size):
+                        if not _submit_next():
+                            break
 
-                    # 检查点
-                    if len(results) % checkpoint_interval == 0:
-                        self._save_checkpoint(output_dir, results, retained_data, discarded_data)
+                    while pending_futures:
+                        future = next(as_completed(pending_futures))
+                        idx = pending_futures.pop(future)
 
-                    # 早停判断
-                    if max_retained is not None and len(retained_data) >= max_retained:
-                        logger.info(f"达到最大保留数限制 ({max_retained})，提前停止")
-                        stopped = True
-                        # 取消尚未开始的任务
-                        for f in list(pending_futures.keys()):
-                            if not f.done():
-                                f.cancel()
-                        pending_futures.clear()
-                        break
+                        try:
+                            qa_pair, evaluation, output = future.result()
+                        except Exception as e:
+                            qa_pair = qa_pairs[idx]
+                            logger.error(f"Future failed {qa_pair.id}: {e}")
+                            evaluation = self._create_error_result(qa_pair, str(e))
+                            output = None
+                            error_line = _format_error_line(qa_pair, str(e))
+                            result_lines.append(error_line)
+                            if len(result_lines) > _MAX_RESULT_LINES:
+                                result_lines.pop(0)
 
-                    # 补充新任务，维持并发度
-                    _submit_next()
-        finally:
-            progress.stop()
+                        _on_result(qa_pair, evaluation, output)
+                        progress.update(task, advance=1)
+
+                        # Checkpoint
+                        if len(results) % checkpoint_interval == 0:
+                            self._save_checkpoint(output_dir, results, retained_data, discarded_data)
+
+                        # Early stop
+                        if max_retained is not None and len(retained_data) >= max_retained:
+                            logger.info(f"Reached max retained limit ({max_retained}), stopping early")
+                            stopped = True
+                            for f in list(pending_futures.keys()):
+                                if not f.done():
+                                    f.cancel()
+                            pending_futures.clear()
+                            break
+
+                        # Replenish
+                        _submit_next()
+
+                        # Update display
+                        live.update(_build_group())
+
+            finally:
+                progress.stop()
 
         return self._save_results(output_dir, results, retained_data, discarded_data)
 
     def _load_qa_pairs(self, input_paths: List[str]) -> List[QAPair]:
-        """加载 QA 对（支持多文件）"""
+        """Load QA pairs from multiple files."""
         all_items = []
         for input_path in input_paths:
             path = Path(input_path)
@@ -268,26 +400,25 @@ class BatchProcessor:
                 elif suffix == ".jsonl":
                     items = safe_read_jsonl(input_path)
                 else:
-                    raise ValueError(f"不支持的文件格式: {suffix}")
+                    raise ValueError(f"Unsupported file format: {suffix}")
             except FileNotFoundError:
-                raise FileNotFoundError(f"输入文件不存在: {input_path}")
+                raise FileNotFoundError(f"Input file not found: {input_path}")
 
             all_items.extend(items)
-            logger.info(f"已加载 {len(items)} 条数据从 {input_path}")
+            logger.info(f"Loaded {len(items)} items from {input_path}")
 
         qa_pairs = []
         for i, item in enumerate(all_items):
             try:
                 qa_pairs.append(self._create_qa_pair(item, i))
             except ValueError as e:
-                logger.warning(f"跳过无效 QA 条目（索引 {i}）: {e}")
+                logger.warning(f"Skipping invalid QA entry (index {i}): {e}")
 
         return qa_pairs
 
 
     def _create_qa_pair(self, item: Dict, index: int) -> QAPair:
-        """创建 QAPair 对象"""
-        # 自动识别 messages 格式（如 OpenAI 对话格式）
+        """Create a QAPair object from a raw dictionary."""
         if "messages" in item and isinstance(item["messages"], list):
             question = ""
             answer = ""
@@ -300,17 +431,14 @@ class BatchProcessor:
                     elif role == "assistant" and not answer:
                         answer = content
         else:
-            # 支持多种字段名
             question = item.get("question") or item.get("Question") or item.get("q", "")
             answer = item.get("answer") or item.get("Answer") or item.get("a", "")
 
         qa_id = item.get("id") or item.get("ID") or f"qa_{index}"
 
-        # 保留原始元数据（排除所有已识别的字段变体）
         excluded_keys = {"id", "ID", "question", "Question", "q", "answer", "Answer", "a", "messages"}
         metadata = {k: v for k, v in item.items() if k not in excluded_keys}
 
-        # 保留原始输入数据的完整副本，用于输出时保持格式一致
         raw_data = dict(item)
 
         return QAPair(
@@ -327,11 +455,11 @@ class BatchProcessor:
         evidence: Any,
         evaluation: EvaluationResult
     ) -> Dict[str, Any]:
-        """格式化输出——保持与输入格式一致，不新增字段"""
+        """Format output — preserves input format without adding extra fields."""
         return qa_pair.raw_data
 
     def _create_error_result(self, qa_pair: QAPair, error: str) -> EvaluationResult:
-        """创建错误结果"""
+        """Create an error result."""
         return EvaluationResult.create_error_result(qa_pair, error, Conclusion.DISCARD)
 
     def _save_checkpoint(
@@ -341,7 +469,7 @@ class BatchProcessor:
         retained: List[Dict],
         discarded: List[Dict]
     ):
-        """保存检查点（异步，后台线程写入，不阻塞处理）"""
+        """Save checkpoint (async, background thread, non-blocking)."""
         threading.Thread(
             target=self._save_checkpoint_sync,
             args=(output_dir, len(results), len(retained), len(discarded)),
@@ -355,9 +483,9 @@ class BatchProcessor:
         retained_count: int,
         discarded_count: int,
     ):
-        """检查点同步写入（在后台线程中执行）"""
+        """Synchronous checkpoint write (runs in background thread)."""
         if not self._checkpoint_lock.acquire(blocking=False):
-            logger.debug("检查点写入已在进行，跳过")
+            logger.debug("Checkpoint write already in progress, skipping")
             return
         try:
             checkpoint_dir = Path(output_dir) / "checkpoint"
@@ -368,9 +496,9 @@ class BatchProcessor:
                     "retained_count": retained_count,
                     "discarded_count": discarded_count,
                 }, f, ensure_ascii=False, indent=2)
-            logger.debug(f"检查点已保存: {processed_count} 条已处理")
+            logger.debug(f"Checkpoint saved: {processed_count} items processed")
         except Exception as e:
-            logger.warning(f"检查点保存失败: {e}")
+            logger.warning(f"Checkpoint save failed: {e}")
         finally:
             self._checkpoint_lock.release()
 
@@ -381,30 +509,26 @@ class BatchProcessor:
         retained: List[Dict],
         discarded: List[Dict]
     ) -> EvaluationSummary:
-        """保存最终结果"""
+        """Save final results."""
         output_path = Path(output_dir)
 
-        # 保存保留的数据（只在有数据时保存）
         if retained:
             cleaned_dir = output_path / "cleaned_data"
             ensure_dir(str(cleaned_dir))
             with open(cleaned_dir / "retained_qa.json", "w", encoding="utf-8") as f:
                 json.dump(retained, f, ensure_ascii=False, indent=2)
 
-        # 保存丢弃的数据（只在有数据时保存）
         if discarded:
             rejected_dir = output_path / "rejected"
             ensure_dir(str(rejected_dir))
             with open(rejected_dir / "discarded_qa.json", "w", encoding="utf-8") as f:
                 json.dump(discarded, f, ensure_ascii=False, indent=2)
 
-        # 生成并保存报告
         from src.report import ReportGenerator
         report_gen = ReportGenerator()
         report = report_gen.generate(results)
         report_gen.save(report, str(output_path / "reports"))
 
-        # 保存摘要
         summary = report.summary
         with open(output_path / "summary.json", "w", encoding="utf-8") as f:
             json.dump({
@@ -417,9 +541,9 @@ class BatchProcessor:
             }, f, ensure_ascii=False, indent=2)
 
         logger.info(
-            f"结果已保存: 保留 {summary.retained} 条, "
-            f"丢弃 {summary.discarded} 条 "
-            f"(保留率 {summary.retention_rate:.1%})"
+            f"Results saved: {summary.retained} retained, "
+            f"{summary.discarded} discarded "
+            f"(retention rate: {summary.retention_rate:.1%})"
         )
 
         return summary

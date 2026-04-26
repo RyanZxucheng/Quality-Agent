@@ -94,10 +94,7 @@ class InternalSearchExecutor:
 
         chunks_file = Path(self.config.index_dir) / "chunks.jsonl"
         if not chunks_file.exists():
-            logger.info(
-                f"Internal search index not found at {chunks_file}. "
-                "Skipping internal retrieval."
-            )
+                logger.debug("Internal search index not available. Skipping internal retrieval.")
             self._chunks = []
             return False
 
@@ -105,7 +102,7 @@ class InternalSearchExecutor:
             self._load_chunks(chunks_file)
             self._build_bm25()
             self._build_tfidf()
-            logger.info(f"Loaded {len(self._chunks)} chunks from {chunks_file}")
+            logger.debug(f"Loaded {len(self._chunks)} chunks from {chunks_file}")
             return len(self._chunks) > 0
         except Exception as e:
             logger.error(f"Failed to load internal index: {e}")

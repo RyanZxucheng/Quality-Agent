@@ -73,7 +73,7 @@ class EvidenceCollector:
         Returns:
             EvidencePackage（兼容旧版 dict.get() 接口）
         """
-        logger.info(f"[EvidenceCollector] Starting collection for {qa_pair.id}")
+        logger.debug(f"[EvidenceCollector] Starting collection for {qa_pair.id}")
 
         self_check_rounds: List[SelfCheckResult] = []
         internal_context: Optional[InternalContext] = None
@@ -86,7 +86,7 @@ class EvidenceCollector:
             answer=qa_pair.answer,
         )
         self_check_rounds.append(round0)
-        logger.info(
+        logger.debug(
             f"[Round 0] confidence={round0.confidence:.2f} "
             f"action={round0.next_action.value} "
             f"missing='{round0.missing_slots[:80]}'"
@@ -128,7 +128,7 @@ class EvidenceCollector:
             ranked_results=ranked_results,
         )
 
-        logger.info(
+        logger.debug(
             f"[EvidenceCollector] Done for {qa_pair.id}: "
             f"rounds={package.rounds_executed} "
             f"internal_chunks={len(internal_context.chunks) if internal_context else 0} "
@@ -171,7 +171,7 @@ class EvidenceCollector:
                 try:
                     result = self._run_internal_search(qa_pair, missing_slots)
                     internal_context = result
-                    logger.info(
+                    logger.debug(
                         f"[Round 1/internal] {len(result.chunks)} chunks retrieved"
                     )
                 except Exception as e:
@@ -188,7 +188,7 @@ class EvidenceCollector:
                 try:
                     result = self._run_external_search(missing_slots)
                     external_evidence = result
-                    logger.info(
+                    logger.debug(
                         f"[Round 1/external] {len(result)} items fetched"
                     )
                 except Exception as e:
@@ -273,7 +273,7 @@ class EvidenceCollector:
         top_n = self.config.rerank.top_n
         try:
             ranked = reranker.rerank(query, candidates, top_n)
-            logger.info(
+            logger.debug(
                 f"[Rerank] {len(candidates)} candidates → top {len(ranked)} results "
                 f"(internal={sum(1 for r in ranked if r.source == 'internal')}, "
                 f"external={sum(1 for r in ranked if r.source == 'external')})"
@@ -318,31 +318,31 @@ class EvidenceCollector:
 
         if ranked_results:
             # 优先使用 Rerank 后的统一排序结果
-            parts.append("═══ 检索证据（Rerank 混合排序）═══")
+            parts.append("═══ Retrieved Evidence (Rerank Mixed Ranking) ═══")
             for i, result in enumerate(ranked_results, 1):
-                source_tag = "内部知识库" if result.source == "internal" else "外部检索"
+                source_tag = "Internal KB" if result.source == "internal" else "External"
                 if result.source == "internal" and result.chunk:
-                    ref = f"文档={result.chunk.doc_id}"
+                    ref = f"doc={result.chunk.doc_id}"
                 elif result.source == "external" and result.evidence:
                     ref = f"{result.evidence.tool_name} · {result.evidence.source}"
                 else:
                     ref = result.source
                 parts.append(
-                    f"[{i}] [{source_tag}] {ref} (相关度={result.relevance_score:.3f})\n"
+                    f"[{i}] [{source_tag}] {ref} (relevance={result.relevance_score:.3f})\n"
                     f"  {result.content[:300]}"
                 )
         else:
             # Reranker 未启用时，分别展示内部和外部结果
             if internal_context and internal_context.chunks:
-                parts.append("\n═══ INTERNAL 证据（内部知识库）═══")
+                parts.append("\n═══ INTERNAL Evidence (Knowledge Base) ═══")
                 parts.append(internal_context.to_summary_text())
 
             if external_evidence:
-                parts.append("\n═══ EXTERNAL 证据（外部检索）═══")
+                parts.append("\n═══ EXTERNAL Evidence (Web Search) ═══")
                 for ev in external_evidence:
                     parts.append(
                         f"[{ev.tool_name}] {ev.source}\n"
                         f"  {ev.snippet}"
                     )
 
-        return "\n".join(parts) if parts else "未收集到有效证据"
+        return "\n".join(parts) if parts else "No valid evidence collected"

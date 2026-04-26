@@ -105,7 +105,7 @@ class EvaluationResult:
             qa_pair=qa_pair,
             scores=ScoreResult.create_error_result(qa_pair, error, "processing_error"),
             conclusion=conclusion,
-            reason=f"处理错误: {error}"
+            reason=f"Processing error: {error}"
         )
 
 
@@ -159,10 +159,10 @@ class InternalContext:
     def to_summary_text(self) -> str:
         """生成文本摘要供 LLM 使用"""
         if not self.chunks:
-            return "内部知识库：未检索到相关内容"
-        lines = ["【内部知识库检索结果】"]
+            return "Internal KB: no relevant content found"
+        lines = ["[Internal Knowledge Base Results]"]
         for i, chunk in enumerate(self.chunks[:5], 1):
-            lines.append(f"  [{i}] 文档={chunk.doc_id} 相关度={chunk.relevance_score:.2f}")
+            lines.append(f"  [{i}] doc={chunk.doc_id} relevance={chunk.relevance_score:.2f}")
             lines.append(f"      {chunk.content[:200]}")
         return "\n".join(lines)
 

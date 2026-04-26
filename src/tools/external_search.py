@@ -185,7 +185,7 @@ class BingSearchTool(BaseExternalTool):
 
             b_results_element = soup.find("ol", id="b_results")
             if b_results_element is None:
-                logger.warning("没有找到 ol#b_results，可能是页面结构变了。")
+                logger.warning("Could not find ol#b_results element, page structure may have changed.")
                 return []
 
             b_results_tag = cast(Tag, b_results_element)
@@ -642,7 +642,7 @@ class ExternalSearchRunner:
 
         for tool in self._tools:
             try:
-                logger.info(f"External search [{tool.name}] for: {missing_slots[:120]}")
+                logger.debug(f"External search [{tool.name}] for: {missing_slots[:120]}")
                 results = tool.search(missing_slots)
                 if results:
                     all_evidence.extend(results)

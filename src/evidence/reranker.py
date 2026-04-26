@@ -136,7 +136,7 @@ class LocalReranker(BaseReranker):
         self._model = model
         self._tokenizer = tokenizer
         self._engine = "hf_sequence_classifier"
-        logger.info(f"Loaded HF local reranker: {self.model_name} on {device}")
+        logger.debug(f"Loaded HF local reranker: {self.model_name} on {device}")
 
     def _predict_hf_scores(self, query: str, candidates: list) -> list:
         """用 HF SequenceClassification 模型对 (query, doc) 批量打分。"""
@@ -214,7 +214,7 @@ class LocalReranker(BaseReranker):
             from sentence_transformers.cross_encoder import CrossEncoder
             self._model = CrossEncoder(self.model_name, device=resolved_device)
             self._engine = "cross_encoder"
-            logger.info(f"Loaded local reranker: {self.model_name} on {resolved_device}")
+            logger.debug(f"Loaded local reranker: {self.model_name} on {resolved_device}")
         except ImportError:
             raise ImportError(
                 "sentence-transformers not installed. "
@@ -278,7 +278,7 @@ class CohereReranker(BaseReranker):
         try:
             import cohere
             self._client = cohere.Client(api_key=self.api_key)
-            logger.info(f"Cohere reranker initialized (model={self.model})")
+            logger.debug(f"Cohere reranker initialized (model={self.model})")
         except ImportError:
             raise ImportError(
                 "cohere not installed. Install with: pip install cohere"

@@ -1,7 +1,6 @@
 """
-终端输出美化模块
-基于 rich 库提供彩色、结构化的终端输出，
-同时保持文件日志的完整格式不变。
+Terminal output formatting module.
+Provides rich, colorized terminal output while keeping full-format file logs.
 """
 import logging
 from pathlib import Path
@@ -12,8 +11,10 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from rich.table import Table
 from rich import box
+from rich.columns import Columns
+from rich.text import Text
 
-# ── Console 单例 ──────────────────────────────────────────────────────────────
+# ── Console singleton ──────────────────────────────────────────────────────────
 
 _console: Optional[Console] = None
 
@@ -25,7 +26,7 @@ def get_console() -> Console:
     return _console
 
 
-# ── 日志抑制 ──────────────────────────────────────────────────────────────────
+# ── Logger suppression ─────────────────────────────────────────────────────────
 
 _NOISY_LOGGERS = [
     "urllib3",
@@ -41,36 +42,35 @@ _NOISY_LOGGERS = [
 
 
 def suppress_noisy_loggers():
-    """将第三方库的日志级别提升为 WARNING，减少终端噪音"""
+    """Raise third-party library log levels to WARNING to reduce terminal noise."""
     for name in _NOISY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
-# ── 日志设置 ──────────────────────────────────────────────────────────────────
+# ── Logging setup ──────────────────────────────────────────────────────────────
 
 def setup_console_logging(verbose: bool = False, output_dir: Optional[str] = None) -> Console:
     """
-    设置终端和文件日志
+    Set up terminal and file logging.
 
-    - 终端：RichHandler，彩色输出，无时间戳/模块路径
-    - 文件：标准 FileHandler，保留完整格式用于事后审计
+    - Terminal: RichHandler, colorized, no timestamp/module path
+    - File: standard FileHandler, full format for post-hoc audit
 
     Args:
-        verbose: True 时 root logger 设为 DEBUG 级别
-        output_dir: 日志文件输出目录（None 时不写文件）
+        verbose: set root logger to DEBUG level when True
+        output_dir: log file output directory (no file when None)
 
     Returns:
-        Console 实例
+        Console instance
     """
     console = get_console()
     root_logger = logging.getLogger()
     level = logging.DEBUG if verbose else logging.INFO
 
-    # 清除已有的 handlers（防止重复添加）
     root_logger.handlers.clear()
     root_logger.setLevel(level)
 
-    # ── 终端 Handler ──────────────────────────────────────────────────────
+    # ── Terminal Handler ───────────────────────────────────────────────────
     rh = RichHandler(
         console=console,
         show_time=False,
@@ -82,7 +82,7 @@ def setup_console_logging(verbose: bool = False, output_dir: Optional[str] = Non
     rh.setLevel(level)
     root_logger.addHandler(rh)
 
-    # ── 文件 Handler（保留完整格式） ──────────────────────────────────────
+    # ── File Handler (full format) ─────────────────────────────────────────
     if output_dir:
         log_dir = Path(output_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -96,84 +96,144 @@ def setup_console_logging(verbose: bool = False, output_dir: Optional[str] = Non
         ))
         root_logger.addHandler(fh)
 
-    # 抑制第三方库日志
     suppress_noisy_loggers()
 
     return console
 
 
-# ── 结构化输出辅助函数 ───────────────────────────────────────────────────────
+# ── Structured output helpers ──────────────────────────────────────────────────
 
-def print_header(title: str, subtitle: str = ""):
+def print_header(
+    title: str,
+    model: str = "",
+    input_files: str = "",
+    output_dir: str = "",
+    thresholds: str = "",
+    batch_info: str = "",
+    llm_info: str = "",
+):
     """
-    打印启动横幅
+    Print a compact startup banner with core configuration info.
 
-    ─────────────────────────────────────────────
-    ╭───────────────────────────────────────────╮
-    │  title                                    │
-    │  subtitle                                 │
-    ╰───────────────────────────────────────────╯
+    ┌─ Medical QA Quality Assessment ─────────────────────────────────┐
+    │ Input: example_qa.json  │  Model: claude-3-5-sonnet              │
+    │ Output: data/output     │  Thresholds: 70/35  │  Batch: 5 (par) │
+    └──────────────────────────────────────────────────────────────────┘
     """
     console = get_console()
-    console.rule(style="dim")
-    console.print(Panel.fit(
-        f"[bold cyan]{title}[/bold cyan]"
-        + (f"\n[dim]{subtitle}[/dim]" if subtitle else ""),
+
+    info_lines = []
+    left_parts = []
+    right_parts = []
+
+    if input_files:
+        left_parts.append(f"[bold]Input:[/] {input_files}")
+    if model:
+        right_parts.append(f"[bold]Model:[/] {model}")
+
+    if left_parts or right_parts:
+        line = Text()
+        if left_parts:
+            line.append(left_parts[0])
+            line.append("  │  ")
+        if right_parts:
+            line.append(right_parts[0])
+        info_lines.append(line)
+
+    left_parts2 = []
+    right_parts2 = []
+    if output_dir:
+        left_parts2.append(f"[bold]Output:[/] {output_dir}")
+    if thresholds:
+        right_parts2.append(f"[bold]Thresholds:[/] {thresholds}")
+    if batch_info:
+        right_parts2.append(f"[bold]Batch:[/] {batch_info}")
+
+    if left_parts2 or right_parts2:
+        line2 = Text()
+        if left_parts2:
+            line2.append(left_parts2[0])
+            line2.append("  │  ")
+        if right_parts2:
+            line2.append("  │  ".join(right_parts2))
+        info_lines.append(line2)
+
+    if llm_info:
+        line3 = Text()
+        line3.append(f"[dim]{llm_info}[/dim]")
+        info_lines.append(line3)
+
+    content = Text.assemble(
+        (f"  {title}", "bold cyan"),
+        "\n",
+    )
+    for il in info_lines:
+        content.append("\n")
+        content.append(Text("  ") + il)
+
+    console.print()
+    console.print(Panel(
+        content,
         border_style="cyan",
+        box=box.HEAVY_EDGE,
+        padding=(0, 1),
     ))
 
 
-def print_summary_panel(total: int, retained: int, discarded: int,
-                        retention_rate: float, average_score: float,
-                        dimension_averages: Optional[dict] = None):
+def print_summary_panel(
+    total: int,
+    retained: int,
+    discarded: int,
+    retention_rate: float,
+    average_score: float,
+    dimension_averages: Optional[dict] = None,
+):
     """
-    打印最终统计摘要面板
+    Print a compact evaluation summary panel.
 
-    ╭───────────────────────────────────────────╮
-    │  Metric                    Value          │
-    │  Total processed           150            │
-    │  ...                                      │
-    ╰───────────────────────────────────────────╯
+    ┌─ Evaluation Complete ─────────────────────────────────────────────┐
+    │ ✓ Retained: 120/150 (80.0%)  │  Avg Score: 75.2                  │
+    │   accuracy: 38.2  completeness: 36.5  consistency: 35.1  safety   │
+    └──────────────────────────────────────────────────────────────────┘
     """
     console = get_console()
-    console.rule(style="dim")
 
-    table = Table(
-        show_header=True,
-        header_style="bold cyan",
-        box=box.ROUNDED,
+    status_icon = "[bold green]✓[/]" if retention_rate >= 0.5 else "[bold yellow]⚠[/]"
+
+    summary = Text.assemble(
+        (f"  {status_icon} ", ""),
+        (f"[bold]Retained:[/] {retained}/{total} ({retention_rate:.1%})", "green" if retention_rate >= 0.5 else "yellow"),
+        "  │  ",
+        (f"[bold]Avg Score:[/] {average_score:.1f}", "white"),
     )
-    table.add_column("指标", style="white")
-    table.add_column("数值", style="green", justify="right")
 
-    table.add_row("总处理数", str(total))
-    table.add_row("保留", str(retained))
-    table.add_row("丢弃", str(discarded))
-    table.add_row("保留率", f"{retention_rate:.1%}")
-    table.add_row("平均分", f"{average_score:.1f}")
+    lines = [summary]
 
     if dimension_averages:
-        console.rule(style="dim")
-        dim_table = Table(
-            show_header=True,
-            header_style="bold cyan",
-            box=box.ROUNDED,
-        )
-        dim_table.add_column("维度", style="white")
-        dim_table.add_column("平均分", style="green", justify="right")
-
+        dim_text = Text("  ")
+        dim_parts = []
         for name, avg in dimension_averages.items():
-            dim_table.add_row(name, f"{avg:.1f}")
+            color = "green" if avg >= 30 else "yellow" if avg >= 20 else "red"
+            dim_parts.append(f"[{color}]{name}: {avg:.1f}[/{color}]")
+        dim_text.append("  │  ".join(dim_parts))
+        lines.append(Text())
+        lines.append(dim_text)
 
-        console.print(Panel.fit(
-            dim_table,
-            title="[bold]维度平均分[/bold]",
-            border_style="cyan",
-        ))
+    content = Text("\n".join(str(t) for t in lines) if False else Text())
 
-    console.print(Panel.fit(
-        table,
-        title="[bold]评估摘要[/bold]",
-        border_style="cyan",
+    # Rebuild properly
+    content2 = Text()
+    for i, line in enumerate(lines):
+        if i > 0:
+            content2.append("\n")
+        content2.append(line)
+
+    console.print()
+    console.print(Panel(
+        content2,
+        title="[bold]Evaluation Complete[/bold]",
+        border_style="green",
+        box=box.HEAVY_EDGE,
+        padding=(0, 1),
     ))
-    console.rule(style="dim")
+    console.print()

@@ -140,41 +140,41 @@ class LLMScoringEngine:
     支持多种 LLM 后端
     """
 
-    SYSTEM_PROMPT = """你是一位医学数据质量评估专家。你的任务是基于多轮收集的客观证据，对医学问答对进行质量评分。
+    SYSTEM_PROMPT = """You are a medical data quality assessment expert. Your task is to evaluate medical QA pairs based on multi-round collected objective evidence.
 
-【评分维度】（总分100）
-1. 完整性 (0-30分): 问题是否清晰、回答是否充分、信息是否完整
-2. 准确性 (0-45分): 医学知识是否正确、术语是否准确、是否符合指南（重点参考证据）
-3. 专业性 (0-25分): 表达是否专业、是否使用标准术语、是否有免责声明
+[Scoring Dimensions] (Total: 100)
+1. Completeness (0-30): Whether the question is clear, the answer is sufficient, and the information is complete.
+2. Accuracy (0-45): Whether medical knowledge is correct, terminology is accurate, and guidelines are followed (key: reference evidence).
+3. Professionalism (0-25): Whether the expression is professional, uses standard terminology, and includes disclaimers.
 
-【证据可信度层级】
-证据分为三类，评分时按优先级从高到低参考：
-- EXTERNAL（外部权威来源）：PubMed、WHO、NCCN 等，可信度最高
-- INTERNAL（内部知识库）：机构知识库检索结果，可信度高
-- BASE（基础工具）：术语标准化、实体识别、维基百科等，作为辅助参考
+[Evidence Credibility Hierarchy]
+Evidence is classified into three levels, to be referenced in priority order:
+- EXTERNAL (External authoritative sources): PubMed, WHO, NCCN, etc. Highest credibility.
+- INTERNAL (Internal knowledge base): Institutional knowledge base retrieval results. High credibility.
+- BASE (Base tools): Terminology standardization, entity recognition, Wikipedia, etc. Supplementary reference.
 
-若不同来源结论冲突，优先采信高可信度来源；若证据明显不足，应在评分理由中注明。
+If sources conflict, prioritize higher credibility sources. If evidence is insufficient, note this in the scoring reason.
 
-【评分要求】
-- 必须基于提供的证据进行评分，特别是准确性维度
-- 评分理由需指明引用的证据来源（BASE / INTERNAL / EXTERNAL）
-- 输出必须是有效的 JSON 格式
+[Scoring Requirements]
+- Must score based on provided evidence, especially for the accuracy dimension.
+- Scoring reasons must cite the evidence source (BASE / INTERNAL / EXTERNAL).
+- Output must be valid JSON format.
 
-【输出格式】
+[Output Format]
 {
-    "completeness": {"score": 整数0-30, "reason": "评分理由"},
-    "accuracy": {"score": 整数0-45, "reason": "评分理由（需引用证据来源）"},
-    "professionalism": {"score": 整数0-25, "reason": "评分理由"}
+    "completeness": {"score": integer 0-30, "reason": "scoring reason"},
+    "accuracy": {"score": integer 0-45, "reason": "scoring reason (cite evidence source)"},
+    "professionalism": {"score": integer 0-25, "reason": "scoring reason"}
 }"""
 
-    USER_PROMPT_TEMPLATE = """【待评估数据】
+    USER_PROMPT_TEMPLATE = """[QA Data to Evaluate]
 Question: {question}
 Answer: {answer}
 
-【多轮收集的客观证据】
+[Multi-Round Collected Evidence]
 {evidence_summary}
 
-请基于以上证据进行评分，优先参考 EXTERNAL > INTERNAL > BASE 来源，输出JSON格式:"""
+Please score based on the above evidence, prioritizing EXTERNAL > INTERNAL > BASE sources. Output JSON format:"""
 
     def __init__(
         self,
@@ -233,7 +233,7 @@ Answer: {answer}
         Returns:
             ScoreResult: 评分结果
         """
-        logger.info(f"LLM scoring for {qa_pair.id} using {self.provider}/{self.model}")
+        logger.debug(f"LLM scoring for {qa_pair.id} using {self.provider}/{self.model}")
 
         # 构造 prompt
         prompt = self.USER_PROMPT_TEMPLATE.format(

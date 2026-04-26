@@ -39,10 +39,10 @@ def safe_read_json(file_path: str) -> List[Dict[str, Any]]:
 
         return items
     except FileNotFoundError:
-        logger.error(f"文件不存在: {file_path}")
+        logger.error(f"File not found: {file_path}")
         raise
     except json.JSONDecodeError as e:
-        logger.error(f"JSON解析错误 {file_path}: {e}")
+        logger.error(f"JSON parse error in {file_path}: {e}")
         raise ValueError(f"Invalid JSON in {file_path}: {e}")
 
 
@@ -67,9 +67,9 @@ def safe_read_jsonl(file_path: str) -> List[Dict[str, Any]]:
                     item = json.loads(line)
                     items.append(item)
                 except json.JSONDecodeError as e:
-                    logger.warning(f"跳过JSONL第{i+1}行解析错误: {e}")
+                    logger.warning(f"Skipping JSONL line {i+1} parse error: {e}")
     except FileNotFoundError:
-        logger.error(f"文件不存在: {file_path}")
+        logger.error(f"File not found: {file_path}")
         raise
 
     return items
@@ -92,7 +92,7 @@ def safe_read_csv(file_path: str) -> List[Dict[str, Any]]:
             for row in reader:
                 items.append(row)
     except FileNotFoundError:
-        logger.error(f"文件不存在: {file_path}")
+        logger.error(f"File not found: {file_path}")
         raise
 
     return items

@@ -42,20 +42,20 @@ class DecisionEngine:
 
         # 优先检查证据不足标志
         if evidence_package is not None and evidence_package.evidence_insufficient:
-            logger.info(
+            logger.debug(
                 f"Decision for {qa_pair.id}: DISCARD (evidence insufficient after all rounds)"
             )
             return EvaluationResult(
                 qa_pair=qa_pair,
                 scores=score_result,
                 conclusion=Conclusion.DISCARD,
-                reason="证据不足，待人工复核",
+                reason="Evidence insufficient, manual review required",
             )
 
         # 正常决策逻辑
         conclusion, reason = self._make_decision(total_score, accuracy_score, score_result)
 
-        logger.info(
+        logger.debug(
             f"Decision for {qa_pair.id}: {conclusion.value} "
             f"(total={total_score}, accuracy={accuracy_score})"
         )
@@ -82,12 +82,12 @@ class DecisionEngine:
         """构建保留原因"""
         reasons = []
         if total_score >= 80:
-            reasons.append(f"质量优秀（总分 {total_score}）")
+            reasons.append(f"Quality excellent (total {total_score})")
         else:
-            reasons.append(f"质量合格（总分 {total_score}）")
+            reasons.append(f"Quality acceptable (total {total_score})")
 
         if accuracy_score >= 30:
-            reasons.append("医学准确性良好")
+            reasons.append("Medical accuracy satisfactory")
 
         return "; ".join(reasons)
 
@@ -110,14 +110,14 @@ class DecisionEngine:
         if total_score < self.thresholds.total_min:
             return (
                 Conclusion.DISCARD,
-                f"总分 {total_score} 低于阈值 {self.thresholds.total_min}"
+                f"Total score {total_score} below threshold {self.thresholds.total_min}"
             )
 
         # 2. 准确性不达标
         if accuracy_score < self.thresholds.accuracy_min:
             return (
                 Conclusion.DISCARD,
-                f"准确性分数 {accuracy_score} 低于阈值 {self.thresholds.accuracy_min}"
+                f"Accuracy score {accuracy_score} below threshold {self.thresholds.accuracy_min}"
             )
 
         # 3. 检查是否有严重错误
@@ -126,7 +126,7 @@ class DecisionEngine:
             issue_types = ", ".join(set(i.get("type", "unknown") for i in critical_issues))
             return (
                 Conclusion.DISCARD,
-                f"存在严重问题: {issue_types}"
+                f"Critical issues found: {issue_types}"
             )
 
         # 通过所有检查，保留数据
