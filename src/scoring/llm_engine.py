@@ -3,7 +3,6 @@ LLM 评分引擎
 基于工具收集的证据，使用 LLM 进行质量评分
 支持多种后端: Anthropic, vLLM, OpenAI
 """
-import asyncio
 import logging
 import threading
 from abc import ABC, abstractmethod
@@ -31,7 +30,7 @@ class AnthropicClient(LLMClient):
 
     def __init__(self, model: str, api_key: str, temperature: float, max_tokens: int):
         try:
-            from anthropic import AsyncAnthropic
+            from anthropic import Anthropic
         except ImportError:
             raise ImportError("请安装 anthropic: pip install anthropic")
 
@@ -40,23 +39,10 @@ class AnthropicClient(LLMClient):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.client = AsyncAnthropic(api_key=api_key)
-        self._loop_cache = threading.local()
-
-    def _get_loop(self) -> asyncio.AbstractEventLoop:
-        if not hasattr(self._loop_cache, "loop"):
-            loop = asyncio.new_event_loop()
-            self._loop_cache.loop = loop
-        return self._loop_cache.loop
+        self.client = Anthropic(api_key=api_key)
 
     def chat_completion(self, system_prompt: str, user_prompt: str) -> str:
-        loop = self._get_loop()
-        return loop.run_until_complete(
-            self._achat(system_prompt, user_prompt)
-        )
-
-    async def _achat(self, system_prompt: str, user_prompt: str) -> str:
-        response = await self.client.messages.create(
+        response = self.client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
             temperature=self.temperature,
@@ -81,44 +67,31 @@ class OpenAICompatibleClient(LLMClient):
         api_key: str = ""
     ):
         try:
-            from openai import AsyncOpenAI
+            from openai import OpenAI
         except ImportError:
             raise ImportError("请安装 openai: pip install openai")
 
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self._loop_cache = threading.local()
 
         if base_url:
-            self.client = AsyncOpenAI(
+            self.client = OpenAI(
                 base_url=base_url,
                 api_key=api_key or "not-needed"
             )
         else:
             if not api_key:
                 raise ValueError("OpenAI API key not provided")
-            self.client = AsyncOpenAI(api_key=api_key)
-
-    def _get_loop(self) -> asyncio.AbstractEventLoop:
-        if not hasattr(self._loop_cache, "loop"):
-            loop = asyncio.new_event_loop()
-            self._loop_cache.loop = loop
-        return self._loop_cache.loop
+            self.client = OpenAI(api_key=api_key)
 
     def chat_completion(self, system_prompt: str, user_prompt: str) -> str:
-        loop = self._get_loop()
-        return loop.run_until_complete(
-            self._achat(system_prompt, user_prompt)
-        )
-
-    async def _achat(self, system_prompt: str, user_prompt: str) -> str:
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
 
-        response = await self.client.chat.completions.create(
+        response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             max_tokens=self.max_tokens,
