@@ -586,7 +586,8 @@ TOOL_REGISTRY: Dict[str, type] = {
 class ExternalSearchRunner:
     """
     外部检索调度器
-    按配置列表顺序依次调用启用的工具，全部执行后汇总返回
+    默认并行调用所有启用的工具（各工具在独立线程中运行），全部完成后按原始配置顺序合并结果。
+    可通过 config.parallel_tools=False 回退为串行。
     """
 
     def __init__(self, config: Optional[ExternalSearchConfig] = None):
@@ -619,6 +620,9 @@ class ExternalSearchRunner:
         """
         针对缺失信息描述执行外部检索（单次查询）
 
+        当 config.parallel_tools=True（默认）时，所有启用工具并发执行，
+        结果按原始工具配置顺序合并，任一工具失败不影响其余结果。
+
         Args:
             missing_slots: 自检识别出的缺失信息描述（自然语言段落）
 
@@ -638,8 +642,13 @@ class ExternalSearchRunner:
             logger.info("No external search tools enabled")
             return []
 
-        all_evidence: List[ExternalEvidence] = []
+        if getattr(self.config, "parallel_tools", True) and len(self._tools) > 1:
+            return self._fetch_parallel(missing_slots)
+        return self._fetch_sequential(missing_slots)
 
+    def _fetch_sequential(self, missing_slots: str) -> List[ExternalEvidence]:
+        """串行依次调用各工具"""
+        all_evidence: List[ExternalEvidence] = []
         for tool in self._tools:
             try:
                 logger.debug(f"External search [{tool.name}] for: {missing_slots[:120]}")
@@ -648,5 +657,39 @@ class ExternalSearchRunner:
                     all_evidence.extend(results)
             except Exception as e:
                 logger.error(f"External tool '{tool.name}' raised unexpected error: {e}")
-
         return all_evidence
+
+    def _fetch_parallel(self, missing_slots: str) -> List[ExternalEvidence]:
+        """并行调用所有工具，结果按原始工具顺序合并"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        tool_results: Dict[int, List[ExternalEvidence]] = {}
+        futures_map: Dict[Any, int] = {}
+
+        with ThreadPoolExecutor(max_workers=len(self._tools)) as executor:
+            for idx, tool in enumerate(self._tools):
+                logger.debug(f"External search [{tool.name}] (parallel) for: {missing_slots[:120]}")
+                future = executor.submit(self._call_tool, tool, missing_slots)
+                futures_map[future] = idx
+
+            for future in as_completed(futures_map):
+                idx = futures_map[future]
+                try:
+                    tool_results[idx] = future.result()
+                except Exception as e:
+                    logger.error(f"External tool future for index {idx} raised: {e}")
+                    tool_results[idx] = []
+
+        all_evidence: List[ExternalEvidence] = []
+        for idx in sorted(tool_results):
+            all_evidence.extend(tool_results[idx])
+        return all_evidence
+
+    @staticmethod
+    def _call_tool(tool: BaseExternalTool, missing_slots: str) -> List[ExternalEvidence]:
+        """在线程内安全调用单个工具"""
+        try:
+            return tool.search(missing_slots) or []
+        except Exception as e:
+            logger.error(f"External tool '{tool.name}' raised unexpected error: {e}")
+            return []

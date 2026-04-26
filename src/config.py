@@ -119,6 +119,7 @@ class ExternalSearchConfig:
     enabled: bool = False
     max_results_per_tool: int = 2
     timeout: int = 10
+    parallel_tools: bool = True   # True: 所有启用工具并行调用；False: 串行
     tools: List[ExternalToolConfig] = field(default_factory=lambda: [
         ExternalToolConfig(name="pubmed", enabled=True,
                            query_template="{missing_slot} clinical evidence"),

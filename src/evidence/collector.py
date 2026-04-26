@@ -9,6 +9,7 @@
 """
 import logging
 import threading
+import time
 from typing import Any, List, Optional
 
 from src.config import get_config
@@ -74,6 +75,7 @@ class EvidenceCollector:
             EvidencePackage（兼容旧版 dict.get() 接口）
         """
         logger.debug(f"[EvidenceCollector] Starting collection for {qa_pair.id}")
+        _t_total = time.monotonic()
 
         self_check_rounds: List[SelfCheckResult] = []
         internal_context: Optional[InternalContext] = None
@@ -81,29 +83,42 @@ class EvidenceCollector:
         ranked_results: List[RankedResult] = []
 
         # ── Round 0：快速自检 ─────────────────────────────────────────────────
+        _t0 = time.monotonic()
         round0 = self.self_checker.check(
             question=qa_pair.question,
             answer=qa_pair.answer,
         )
         self_check_rounds.append(round0)
         logger.debug(
-            f"[Round 0] confidence={round0.confidence:.2f} "
+            f"[{qa_pair.id}] self_check={time.monotonic()-_t0:.2f}s "
+            f"confidence={round0.confidence:.2f} "
             f"action={round0.next_action.value} "
             f"missing='{round0.missing_slots[:80]}'"
         )
 
         if round0.next_action == NextAction.SEARCH:
             # ── Round 1：内部检索 + 外部检索【并行】─────────────────────────
+            _t1 = time.monotonic()
             internal_context, external_evidence = self._run_search(
                 qa_pair, round0.missing_slots
             )
+            logger.debug(
+                f"[{qa_pair.id}] search={time.monotonic()-_t1:.2f}s "
+                f"internal_chunks={len(internal_context.chunks) if internal_context else 0} "
+                f"external_items={len(external_evidence)}"
+            )
 
             # ── Rerank：混合候选集统一重排序 ─────────────────────────────────
+            _t2 = time.monotonic()
             ranked_results = self._run_rerank(
                 question=qa_pair.question,
                 missing_slots=round0.missing_slots,
                 internal_context=internal_context,
                 external_evidence=external_evidence,
+            )
+            logger.debug(
+                f"[{qa_pair.id}] rerank={time.monotonic()-_t2:.2f}s "
+                f"ranked={len(ranked_results)}"
             )
 
         # ── 判断证据是否仍然不足 ──────────────────────────────────────────────
@@ -129,11 +144,7 @@ class EvidenceCollector:
         )
 
         logger.debug(
-            f"[EvidenceCollector] Done for {qa_pair.id}: "
-            f"rounds={package.rounds_executed} "
-            f"internal_chunks={len(internal_context.chunks) if internal_context else 0} "
-            f"external_items={len(external_evidence)} "
-            f"ranked={len(ranked_results)} "
+            f"[{qa_pair.id}] collect_total={time.monotonic()-_t_total:.2f}s "
             f"insufficient={package.evidence_insufficient}"
         )
         return package

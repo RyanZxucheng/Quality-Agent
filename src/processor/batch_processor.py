@@ -6,6 +6,7 @@ Evidence Collection → LLM Scoring → Decision
 import json
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -185,11 +186,22 @@ class BatchProcessor:
             (qa_pair, evaluation, output_dict) — output_dict is None on error
         """
         try:
+            _t_total = time.monotonic()
+
             evidence = self.evidence_collector.collect(qa_pair)
+
+            _t_score = time.monotonic()
             score_result = self.llm_scoring_engine.score(qa_pair, evidence)
+            _scoring_ms = (time.monotonic() - _t_score) * 1000
+
             evidence_pkg = evidence if isinstance(evidence, EvidencePackage) else None
             evaluation = self.decision_engine.decide(score_result, evidence_pkg)
             evaluation.evidence = evidence
+
+            _total_ms = (time.monotonic() - _t_total) * 1000
+            logger.debug(
+                f"[{qa_pair.id}] scoring={_scoring_ms:.0f}ms  total={_total_ms:.0f}ms"
+            )
 
             output = self._format_output(qa_pair, evidence, evaluation)
             return qa_pair, evaluation, output

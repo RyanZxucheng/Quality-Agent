@@ -11,6 +11,7 @@ Reranker 模块
 """
 import logging
 import os
+import threading
 from abc import ABC, abstractmethod
 from typing import Optional
 
@@ -49,6 +50,9 @@ class LocalReranker(BaseReranker):
 
     依赖：pip install sentence-transformers
     推荐模型（中英双语，适合医疗场景）：BAAI/bge-reranker-base
+
+    多线程安全：用 _infer_lock 串行化 GPU 推理，避免多个 QA 线程并发抢占同一模型
+    导致显存 OOM 或推理抖动。如需更高吞吐，可改为跨 QA 微批队列。
     """
 
     SAFE_FALLBACK_MODEL = "BAAI/bge-reranker-base"
@@ -60,6 +64,7 @@ class LocalReranker(BaseReranker):
         self._model = None
         self._tokenizer = None
         self._engine = "cross_encoder"
+        self._infer_lock = threading.Lock()
 
     def _prefer_hf_sequence_classifier(self) -> bool:
         """Qwen reranker 更适合走 transformers 原生 SequenceClassification 路径。"""
@@ -238,21 +243,22 @@ class LocalReranker(BaseReranker):
         if not candidates:
             return candidates
 
-        try:
-            model = self._get_model()
-            if self._engine == "hf_sequence_classifier":
-                scores = self._predict_hf_scores(query, candidates)
-            else:
-                pairs = [(query, c.content) for c in candidates]
-                scores = model.predict(pairs, batch_size=self.batch_size)
+        with self._infer_lock:
+            try:
+                model = self._get_model()
+                if self._engine == "hf_sequence_classifier":
+                    scores = self._predict_hf_scores(query, candidates)
+                else:
+                    pairs = [(query, c.content) for c in candidates]
+                    scores = model.predict(pairs, batch_size=self.batch_size)
 
-            for candidate, score in zip(candidates, scores):
-                candidate.relevance_score = float(score)
-            ranked = sorted(candidates, key=lambda x: x.relevance_score, reverse=True)
-            return ranked[:top_n]
-        except Exception as e:
-            logger.error(f"Local reranker inference failed: {e}")
-            return candidates[:top_n]
+                for candidate, score in zip(candidates, scores):
+                    candidate.relevance_score = float(score)
+                ranked = sorted(candidates, key=lambda x: x.relevance_score, reverse=True)
+                return ranked[:top_n]
+            except Exception as e:
+                logger.error(f"Local reranker inference failed: {e}")
+                return candidates[:top_n]
 
 
 # ── Cohere Rerank API ─────────────────────────────────────────────────────────

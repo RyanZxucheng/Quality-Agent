@@ -10,6 +10,9 @@ max_results_per_tool: 5
 # 单次工具调用超时（秒）
 timeout: 10
 
+# 是否并行调用多个工具（true: 并发执行，耗时约为最慢工具耗时；false: 串行执行）
+parallel_tools: true
+
 # 工具列表（按列表顺序依次遍历执行）
 tools:
   - name: exa_mcp
