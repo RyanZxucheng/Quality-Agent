@@ -72,24 +72,27 @@ def _format_result_line(
     color = "green" if is_retained else "red"
 
     # Extract brief action description
-    action_text = ""
+    action_segments: List[Tuple[str, str]] = []
     if evidence and isinstance(evidence, EvidencePackage):
         if evidence.self_check_rounds:
             round0 = evidence.self_check_rounds[0]
             if round0.next_action == NextAction.PROCEED:
-                action_text = "self-check passed"
+                action_segments.append(("self-check passed", "green"))
             elif round0.next_action == NextAction.SEARCH:
                 num_internal = len(evidence.internal_context.chunks) if evidence.internal_context else 0
                 num_external = len(evidence.external_evidence)
                 if num_internal + num_external > 0:
-                    total_sources = num_internal + num_external
-                    action_text = f"searched {total_sources} source{'s' if total_sources > 1 else ''}"
-                elif evidence.evidence_insufficient:
-                    action_text = "evidence insufficient"
+                    evidence_count = num_internal + num_external
+                    item_label = "item" if evidence_count == 1 else "items"
+                    search_text = f"found {evidence_count} evidence {item_label}"
                 else:
-                    action_text = "self-check passed"
+                    search_text = "no evidence found"
+                action_segments.extend([
+                    ("self-check failed", "yellow"),
+                    (search_text, "red" if search_text == "no evidence found" else "cyan"),
+                ])
             else:
-                action_text = round0.next_action.value.lower().replace("_", " ")
+                action_segments.append((round0.next_action.value.lower().replace("_", " "), "cyan"))
 
     score = evaluation.scores.total_score if evaluation.scores else 0
 
@@ -104,7 +107,10 @@ def _format_result_line(
 
     line = Text()
     line.append(f"  {qa_pair.id}: ", style="bold")
-    line.append(action_text, style="cyan")
+    for i, (text, style) in enumerate(action_segments):
+        if i > 0:
+            line.append(" → ", style="white")
+        line.append(text, style=style)
     line.append(f" → score {score} → ", style="white")
     line.append(f"{label} ", style=f"bold {color}")
     line.append(icon, style=color)
