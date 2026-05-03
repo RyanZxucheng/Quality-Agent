@@ -17,14 +17,47 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
-# 需要在顶部导入 threading（已存在），此处仅为标记修改位置
-
 import requests
 
 from src.config import ExternalSearchConfig, ExternalToolConfig, get_config
 from src.models import ExternalEvidence
 
 logger = logging.getLogger(__name__)
+
+
+# ── 令牌桶限流器 ─────────────────────────────────────────────────────────────
+
+class TokenBucket:
+    """线程安全的令牌桶限流器"""
+
+    def __init__(self, rate_per_sec: float, capacity: int):
+        self._rate = rate_per_sec
+        self._capacity = capacity
+        self._tokens = float(capacity)
+        self._last_refill = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self, tokens: float = 1.0) -> None:
+        """阻塞直到获取到指定数量的令牌"""
+        while True:
+            wait = self._try_acquire(tokens)
+            if wait == 0.0:
+                return
+            time.sleep(wait)
+
+    def _try_acquire(self, tokens: float) -> float:
+        """尝试获取令牌，返回需要等待的秒数（0表示成功）"""
+        with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_refill
+            self._tokens = min(self._capacity, self._tokens + elapsed * self._rate)
+            self._last_refill = now
+
+            if self._tokens >= tokens:
+                self._tokens -= tokens
+                return 0.0
+
+            return (tokens - self._tokens) / self._rate
 
 
 # ── 工具基类 ─────────────────────────────────────────────────────────────────
@@ -384,6 +417,14 @@ class ExaMCPTool(BaseExternalTool):
         # 兼容 endpoint 字段：允许写成 `exa`（默认别名）
         alias = (tool_cfg.endpoint or "").strip()
         self.alias = alias if alias else self.DEFAULT_ALIAS
+        # 令牌桶限流：rate_limit 单位为"请求/分钟"，0 表示不限流
+        if tool_cfg.rate_limit > 0:
+            self._rate_limiter = TokenBucket(
+                rate_per_sec=tool_cfg.rate_limit / 60.0,
+                capacity=tool_cfg.rate_limit,
+            )
+        else:
+            self._rate_limiter = None
 
     def search(self, query: str) -> List[ExternalEvidence]:
         built_query = self._build_query(query)
@@ -436,6 +477,8 @@ class ExaMCPTool(BaseExternalTool):
         return json.dumps(value, ensure_ascii=False)[1:-1]
 
     def _call_web_search(self, mcporter: str, query: str) -> Optional[str]:
+        if self._rate_limiter is not None:
+            self._rate_limiter.acquire()
         escaped_query = self._escape_for_mcporter_call(query)
         call_expr = (
             f'{self.alias}.{self.DEFAULT_TOOL}(query: "{escaped_query}", '

@@ -111,6 +111,7 @@ class ExternalToolConfig:
     query_template: str = "{missing_slot} medical evidence"
     api_key: str = ""
     endpoint: str = ""
+    rate_limit: int = 0  # 请求/分钟，0=不限流（仅对 ExaMCPTool 生效）
 
 
 @dataclass
